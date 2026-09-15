@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SDD Capstone — Sprint Board</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #fff; --border: #d7dae0; --border-strong: #4b5563;
+    --text: #1f2430; --text-dim: #6b7280; --blue: #1d6fb8; --red: #b3251e;
+    --yellow: #f6d94c; --yellow-border: #d4b62a; --green: #8fe08a; --green-border: #5cbf57;
+    --pink: #f79fc7; --pink-border: #e070a8; --cyan: #85e6e6; --cyan-border: #45c4c4;
+    --accent: #1d6fb8; --shadow: 0 1px 3px rgba(0,0,0,.12); --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; padding:14px; }
+  h1.pagehead { font-size:20px; margin:0 0 4px 2px; }
+  .pagehead .sub { color:var(--text-dim); font-weight:400; font-size:13px; }
+  .statusline { font-size:11.5px; color:var(--text-dim); margin:0 0 10px 2px; }
+  .commitbar { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .commitbtn { background:var(--red); color:#fff; border:none; border-radius:8px; padding:9px 18px; font-size:14px; font-weight:700; cursor:pointer; box-shadow:var(--shadow); }
+  .commitbtn:hover { opacity:.9; }
+  .commitbtn:disabled { opacity:.5; cursor:default; }
+  .commitmsg { font-size:12.5px; color:var(--text-dim); }
+
+  .top-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; margin-bottom:14px; }
+  .panel { background:var(--panel); border:1.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; box-shadow:var(--shadow); min-width:0; }
+  .panel h2 { font-size:14px; text-transform:uppercase; letter-spacing:.03em; color:var(--blue); margin:0 0 8px; }
+  .panel h2.red { color:var(--red); }
+  input[type=text], textarea { width:100%; font-family:inherit; font-size:13px; padding:6px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+  textarea { resize:vertical; min-height:32px; }
+  .sprintname { font-size:17px; font-weight:700; border:none; background:transparent; color:var(--red); padding:2px 0; width:100%; }
+  ul.itemlist { list-style:none; margin:0; padding:0; }
+  ul.itemlist li { display:flex; align-items:flex-start; gap:6px; padding:3px 0; font-size:13px; border-bottom:1px solid var(--border); }
+  ul.itemlist li:last-child { border-bottom:none; }
+  ul.itemlist li .itxt { flex:1; word-break:break-word; }
+  ul.itemlist li .itxt.done { text-decoration:line-through; color:var(--text-dim); }
+  .iconbtn { border:none; background:none; color:var(--text-dim); cursor:pointer; font-size:13px; padding:2px 4px; }
+  .iconbtn:hover { color:var(--red); }
+  .addrow { display:flex; gap:6px; margin-top:8px; }
+  .addrow input { flex:1; }
+  .addrow button, .smallbtn { background:var(--accent); color:#fff; border:none; border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer; white-space:nowrap; }
+  .outcome-box { display:flex; flex-direction:column; align-items:center; gap:6px; margin-top:4px; }
+  .outcome-ring { width:92px; height:92px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; color:var(--red); border:5px solid var(--red); }
+  .outcome-editrow { display:flex; gap:6px; width:100%; margin-top:6px; }
+  .outcome-editrow input { width:100%; font-size:12px; }
+
+  .board-scroll { overflow-x:auto; padding-bottom:8px; }
+  .board { display:flex; gap:10px; min-width:max-content; }
+  .column { background:var(--panel); border:1.5px solid var(--border); border-radius:var(--radius); width:210px; flex:0 0 210px; display:flex; flex-direction:column; box-shadow:var(--shadow); max-height:70vh; }
+  .column.sidecol { width:230px; flex-basis:230px; }
+  .column-head { padding:10px; font-weight:700; font-size:13.5px; color:var(--blue); border-bottom:1.5px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  .column-head .count { font-size:11px; color:var(--text-dim); background:var(--bg); border-radius:10px; padding:1px 7px; }
+  .column-body { padding:8px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:7px; }
+  .card { border-radius:6px; padding:8px 9px; font-size:12.5px; color:#26241a; box-shadow:0 1px 2px rgba(0,0,0,.18); position:relative; word-break:break-word; border:1px solid transparent; }
+  .card.color-yellow { background:var(--yellow); border-color:var(--yellow-border); }
+  .card.color-green { background:var(--green); border-color:var(--green-border); }
+  .card.color-pink { background:var(--pink); border-color:var(--pink-border); }
+  .card.color-cyan { background:var(--cyan); border-color:var(--cyan-border); }
+  .card .card-x { position:absolute; top:2px; right:4px; background:none; border:none; cursor:pointer; font-size:12px; color:rgba(0,0,0,.45); }
+  .card .movewrap { margin-top:6px; }
+  .card select { width:100%; font-size:11px; padding:2px 3px; border-radius:4px; border:none; background:rgba(255,255,255,.65); }
+  .column-addrow { padding:8px; border-top:1.5px solid var(--border); }
+  .colorpicker { display:flex; gap:5px; margin-top:5px; }
+  .colorpicker button { width:18px; height:18px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0; }
+  .colorpicker button.sel { border-color:var(--border-strong); }
+  .colorpicker button.color-yellow { background:var(--yellow); }
+  .colorpicker button.color-green { background:var(--green); }
+  .colorpicker button.color-pink { background:var(--pink); }
+  .colorpicker button.color-cyan { background:var(--cyan); }
+  .designnote { background:var(--bg); border:1px dashed var(--border-strong); border-radius:6px; padding:7px 8px; font-size:12.5px; }
+  .noteam { max-width:500px; margin:60px auto; text-align:center; color:var(--text-dim); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="config.js"></script>
+<script>
+(function(){
+  const params = new URLSearchParams(location.search);
+  const TEAM = params.get('team');
+
+  if (!TEAM) {
+    document.getElementById('app').innerHTML =
+      '<div class="noteam"><h2>No team specified</h2><p>Open this page with a team link, e.g. <code>?team=3</code>.</p></div>';
+    return;
+  }
+
+  const COLUMNS = [
+    { id:'pickme', label:'Pick Me' }, { id:'blocked', label:'BLOCKED' }, { id:'test', label:'Test' },
+    { id:'dev', label:'Dev' }, { id:'review', label:'Review' }, { id:'deploy', label:'Deploy' }, { id:'done', label:'Done! 🎉' },
+  ];
+  const COLORS = ['yellow','green','pink','cyan'];
+
+  let state = defaultState();
+  let saveTimer = null;
+  let lastLocalEditAt = 0;
+
+  function defaultState(){
+    return {
+      sprintName: 'Team ' + TEAM + ' — Sprint 1',
+      sprintGoals: [], blockers: [], retroActions: [], congrats: [],
+      lateCake: "Whoever's card sits in BLOCKED longest at Friday standup brings snacks next sprint.",
+      outcomeLabel: 'Our Outcome', outcomeTarget: '', outcomeCurrent: '',
+      designNotes: [], agenda: [], cards: []
+    };
+  }
+
+  function el(tag, cls, text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!==undefined)e.textContent=text; return e; }
+
+  // ---------- networking ----------
+  function apiGet(){
+    return fetch(APPS_SCRIPT_URL + '?team=' + encodeURIComponent(TEAM))
+      .then(r => r.json());
+  }
+  function apiPost(payload){
+    return fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids CORS preflight
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).catch(() => null);
+  }
+
+  function scheduleSave(){
+    lastLocalEditAt = Date.now();
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      apiPost({ action: 'save', team: TEAM, state: state });
+    }, 500);
+  }
+
+  function commitUpdate(){
+    const btn = document.getElementById('commitBtn');
+    const msg = document.getElementById('commitMsg');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    apiPost({ action: 'commit', team: TEAM, state: state }).then((res) => {
+      btn.disabled = false; btn.textContent = '📨 Commit Update';
+      msg.textContent = (res && res.ok) ? 'Sent — your teacher has the full board snapshot.' : 'Something went wrong sending that. Try again.';
+      setTimeout(() => { msg.textContent = ''; }, 6000);
+    });
+  }
+
+  function poll(){
+    // Skip merging server state right after a local edit, so we don't overwrite
+    // what the student just typed before the save round-trip completes.
+    if (Date.now() - lastLocalEditAt < 2500) return;
+    apiGet().then((res) => {
+      if (res && res.ok && res.state) { state = res.state; renderAll(); }
+    }).catch(() => {});
+  }
+
+  // ---------- mutations ----------
+  function addToList(key, text){ text=(text||'').trim(); if(!text) return; state[key]=(state[key]||[]).concat([text]); scheduleSave(); renderAll(); }
+  function removeFromList(key, idx){ const l=(state[key]||[]).slice(); l.splice(idx,1); state[key]=l; scheduleSave(); renderAll(); }
+  function addRetro(text){ text=(text||'').trim(); if(!text) return; state.retroActions=(state.retroActions||[]).concat([{text,done:false}]); scheduleSave(); renderAll(); }
+  function toggleRetro(idx){ const l=(state.retroActions||[]).slice(); if(l[idx]) l[idx]=Object.assign({},l[idx],{done:!l[idx].done}); state.retroActions=l; scheduleSave(); renderAll(); }
+  function removeRetro(idx){ const l=(state.retroActions||[]).slice(); l.splice(idx,1); state.retroActions=l; scheduleSave(); renderAll(); }
+  function addCard(column, text, color){ text=(text||'').trim(); if(!text) return; state.cards=(state.cards||[]).concat([{id:'c'+Date.now()+Math.random(),text,column,color:color||'yellow',createdAt:Date.now()}]); scheduleSave(); renderBoard(); }
+  function moveCard(id, col){ state.cards=(state.cards||[]).map(c => c.id===id ? Object.assign({},c,{column:col}) : c); scheduleSave(); renderBoard(); }
+  function deleteCard(id){ state.cards=(state.cards||[]).filter(c => c.id!==id); scheduleSave(); renderBoard(); }
+
+  // ---------- rendering ----------
+  function makeListPanel(opts){
+    const panel = el('div','panel');
+    panel.appendChild(el('h2', opts.titleClass||'', opts.title));
+    const ul = el('ul','itemlist');
+    const items = state[opts.key] || [];
+    items.forEach((item, idx) => {
+      const li = el('li');
+      if (opts.retro){
+        const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=!!item.done;
+        cb.addEventListener('change', () => toggleRetro(idx));
+        li.appendChild(cb);
+        li.appendChild(el('span','itxt'+(item.done?' done':''), item.text));
+      } else {
+        li.appendChild(el('span','itxt', item));
+      }
+      const del = el('button','iconbtn','✕');
+      del.addEventListener('click', () => opts.retro ? removeRetro(idx) : removeFromList(opts.key, idx));
+      li.appendChild(del);
+      ul.appendChild(li);
+    });
+    panel.appendChild(ul);
+    const row = el('div','addrow');
+    const input = document.createElement('input'); input.type='text'; input.placeholder=opts.placeholder;
+    const btn = el('button','',opts.addLabel||'Add');
+    function submit(){ opts.retro ? addRetro(input.value) : addToList(opts.key, input.value); input.value=''; input.focus(); }
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', e => { if (e.key==='Enter') submit(); });
+    row.appendChild(input); row.appendChild(btn);
+    panel.appendChild(row);
+    return panel;
+  }
+
+  function renderTop(){
+    const grid = document.getElementById('topGrid');
+    grid.innerHTML = '';
+
+    const sprintPanel = el('div','panel');
+    sprintPanel.appendChild(el('h2','','Sprint'));
+    const nameInput = document.createElement('input'); nameInput.type='text'; nameInput.className='sprintname'; nameInput.value=state.sprintName;
+    nameInput.addEventListener('change', () => { state.sprintName=nameInput.value; scheduleSave(); });
+    sprintPanel.appendChild(nameInput);
+    grid.appendChild(sprintPanel);
+
+    grid.appendChild(makeListPanel({ title:'Sprint Goals', key:'sprintGoals', placeholder:'Add a goal…' }));
+    grid.appendChild(makeListPanel({ title:'Blockers this Sprint', key:'blockers', placeholder:"What's stuck?" }));
+    grid.appendChild(makeListPanel({ title:'Retro Actions', key:'retroActions', retro:true, placeholder:'A change to commit to…' }));
+    grid.appendChild(makeListPanel({ title:'Congrats & Thanks', key:'congrats', placeholder:'Shout someone out…' }));
+    grid.appendChild(makeListPanel({ title:'Agenda', key:'agenda', placeholder:'Add an agenda item…' }));
+
+    const lcPanel = el('div','panel');
+    lcPanel.appendChild(el('h2','red','Late Cake'));
+    const lc = document.createElement('textarea'); lc.value = state.lateCake;
+    lc.addEventListener('change', () => { state.lateCake=lc.value; scheduleSave(); });
+    lcPanel.appendChild(lc);
+    grid.appendChild(lcPanel);
+
+    const ocPanel = el('div','panel');
+    ocPanel.appendChild(el('h2','','Our Outcomes'));
+    const box = el('div','outcome-box');
+    const ring = el('div','outcome-ring', String(state.outcomeCurrent || '—'));
+    box.appendChild(ring);
+    const labelInput = document.createElement('input'); labelInput.type='text'; labelInput.placeholder='Metric name'; labelInput.value=state.outcomeLabel;
+    labelInput.addEventListener('change', () => { state.outcomeLabel=labelInput.value; scheduleSave(); });
+    const row1 = el('div','outcome-editrow'); row1.appendChild(labelInput); box.appendChild(row1);
+    const curInput = document.createElement('input'); curInput.type='text'; curInput.placeholder='Current'; curInput.value=state.outcomeCurrent;
+    curInput.addEventListener('change', () => { state.outcomeCurrent=curInput.value; ring.textContent=curInput.value||'—'; scheduleSave(); });
+    const tgtInput = document.createElement('input'); tgtInput.type='text'; tgtInput.placeholder='Target'; tgtInput.value=state.outcomeTarget;
+    tgtInput.addEventListener('change', () => { state.outcomeTarget=tgtInput.value; scheduleSave(); });
+    const row2 = el('div','outcome-editrow'); row2.appendChild(curInput); row2.appendChild(tgtInput); box.appendChild(row2);
+    ocPanel.appendChild(box);
+    grid.appendChild(ocPanel);
+  }
+
+  function renderBoard(){
+    const board = document.getElementById('board');
+    board.innerHTML = '';
+    const cards = state.cards || [];
+
+    COLUMNS.forEach(col => {
+      const colEl = el('div','column');
+      const head = el('div','column-head');
+      head.appendChild(el('span','',col.label));
+      const inCol = cards.filter(c => c.column===col.id);
+      head.appendChild(el('span','count', String(inCol.length)));
+      colEl.appendChild(head);
+
+      const body = el('div','column-body');
+      inCol.forEach(card => {
+        const cEl = el('div','card color-'+(card.color||'yellow'));
+        const delBtn = el('button','card-x','✕');
+        delBtn.addEventListener('click', () => deleteCard(card.id));
+        cEl.appendChild(delBtn);
+        cEl.appendChild(el('div','',card.text));
+        const moveWrap = el('div','movewrap');
+        const sel = document.createElement('select');
+        COLUMNS.forEach(c2 => {
+          const opt = document.createElement('option'); opt.value=c2.id; opt.textContent='→ '+c2.label;
+          if (c2.id===card.column) opt.selected=true;
+          sel.appendChild(opt);
+        });
+        sel.addEventListener('change', () => moveCard(card.id, sel.value));
+        moveWrap.appendChild(sel);
+        cEl.appendChild(moveWrap);
+        body.appendChild(cEl);
+      });
+      colEl.appendChild(body);
+
+      const addRow = el('div','column-addrow');
+      const input = document.createElement('input'); input.type='text'; input.placeholder='Add a card…';
+      const picker = el('div','colorpicker');
+      let localColor = 'yellow';
+      COLORS.forEach(c => {
+        const b = el('button','color-'+c+(c===localColor?' sel':''));
+        b.addEventListener('click', () => { localColor=c; Array.from(picker.children).forEach(ch=>ch.classList.remove('sel')); b.classList.add('sel'); });
+        picker.appendChild(b);
+      });
+      function submitCard(){ addCard(col.id, input.value, localColor); input.value=''; input.focus(); }
+      input.addEventListener('keydown', e => { if (e.key==='Enter') submitCard(); });
+      const addBtn = el('button','smallbtn','+ Add'); addBtn.style.marginTop='6px'; addBtn.style.width='100%';
+      addBtn.addEventListener('click', submitCard);
+      addRow.appendChild(input); addRow.appendChild(picker); addRow.appendChild(addBtn);
+      colEl.appendChild(addRow);
+      board.appendChild(colEl);
+    });
+
+    const sideEl = el('div','column sidecol');
+    const sideHead = el('div','column-head'); sideHead.appendChild(el('span','','Product Design Goodness'));
+    sideEl.appendChild(sideHead);
+    const sideBody = el('div','column-body');
+    (state.designNotes||[]).forEach((note, idx) => {
+      const n = el('div','designnote');
+      const row = document.createElement('div'); row.style.display='flex'; row.style.justifyContent='space-between'; row.style.gap='6px';
+      row.appendChild(el('span','',note));
+      const del = el('button','iconbtn','✕'); del.addEventListener('click', () => removeFromList('designNotes', idx));
+      row.appendChild(del);
+      n.appendChild(row);
+      sideBody.appendChild(n);
+    });
+    sideEl.appendChild(sideBody);
+    const sideAdd = el('div','column-addrow');
+    const sideInput = document.createElement('input'); sideInput.type='text'; sideInput.placeholder='Mockup, sketch, link…';
+    function submitDesign(){ addToList('designNotes', sideInput.value); sideInput.value=''; sideInput.focus(); }
+    sideInput.addEventListener('keydown', e => { if (e.key==='Enter') submitDesign(); });
+    const sideBtn = el('button','smallbtn','+ Add note'); sideBtn.style.marginTop='6px'; sideBtn.style.width='100%';
+    sideBtn.addEventListener('click', submitDesign);
+    sideAdd.appendChild(sideInput); sideAdd.appendChild(sideBtn);
+    sideEl.appendChild(sideAdd);
+    board.appendChild(sideEl);
+  }
+
+  function renderAll(){ renderTop(); renderBoard(); }
+
+  function buildShell(){
+    const app = document.getElementById('app');
+    app.innerHTML = ''
+      + '<h1 class="pagehead">🗂️ SDD Capstone Sprint Board <span class="sub">— Team ' + TEAM + '</span></h1>'
+      + '<div class="statusline" id="statusline">Loading…</div>'
+      + '<div class="commitbar"><button class="commitbtn" id="commitBtn">📨 Commit Update</button><span class="commitmsg" id="commitMsg"></span></div>'
+      + '<div class="top-grid" id="topGrid"></div>'
+      + '<div class="board-scroll"><div class="board" id="board"></div></div>';
+    document.getElementById('commitBtn').addEventListener('click', commitUpdate);
+  }
+
+  buildShell();
+  apiGet().then((res) => {
+    if (res && res.ok && res.state) state = res.state;
+    document.getElementById('statusline').textContent = 'Connected — syncs every few seconds.';
+    renderAll();
+    setInterval(poll, 6000);
+  }).catch(() => {
+    document.getElementById('statusline').textContent = 'Could not connect — check config.js has the right Apps Script URL.';
+    renderAll();
+  });
+})();
+</script>
+</body>
+</html>
