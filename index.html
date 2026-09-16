@@ -131,6 +131,18 @@
 
   function el(tag, cls, text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!==undefined)e.textContent=text; return e; }
 
+  // Red (early) → amber (halfway) → green (target met). Falls back to red
+  // if either value isn't a usable number yet (e.g. still blank).
+  function outcomeColor(current, target){
+    const c = parseFloat(String(current).replace(/[^0-9.\-]/g,''));
+    const t = parseFloat(String(target).replace(/[^0-9.\-]/g,''));
+    if (!isFinite(c) || !isFinite(t) || t <= 0) return '#b3251e';
+    const pct = c / t;
+    if (pct >= 1) return '#3fa34d';
+    if (pct >= 0.5) return '#d4a017';
+    return '#b3251e';
+  }
+
   // ---------- networking ----------
   function apiGet(){
     return fetch(APPS_SCRIPT_URL + '?team=' + encodeURIComponent(TEAM))
@@ -319,14 +331,28 @@
     ocPanel.appendChild(el('h2','','Our Outcomes'));
     const box = el('div','outcome-box');
     const ring = el('div','outcome-ring', String(state.outcomeCurrent || '—'));
+    const ringColor = outcomeColor(state.outcomeCurrent, state.outcomeTarget);
+    ring.style.color = ringColor;
+    ring.style.borderColor = ringColor;
     box.appendChild(ring);
     const labelInput = document.createElement('input'); labelInput.type='text'; labelInput.placeholder='Metric name'; labelInput.value=state.outcomeLabel;
     labelInput.addEventListener('change', () => { state.outcomeLabel=labelInput.value; scheduleSave(); });
     const row1 = el('div','outcome-editrow'); row1.appendChild(labelInput); box.appendChild(row1);
     const curInput = document.createElement('input'); curInput.type='text'; curInput.placeholder='Current'; curInput.value=state.outcomeCurrent;
-    curInput.addEventListener('change', () => { state.outcomeCurrent=curInput.value; ring.textContent=curInput.value||'—'; scheduleSave(); });
+    curInput.addEventListener('change', () => {
+      state.outcomeCurrent=curInput.value;
+      ring.textContent=curInput.value||'—';
+      const c = outcomeColor(state.outcomeCurrent, state.outcomeTarget);
+      ring.style.color = c; ring.style.borderColor = c;
+      scheduleSave();
+    });
     const tgtInput = document.createElement('input'); tgtInput.type='text'; tgtInput.placeholder='Target'; tgtInput.value=state.outcomeTarget;
-    tgtInput.addEventListener('change', () => { state.outcomeTarget=tgtInput.value; scheduleSave(); });
+    tgtInput.addEventListener('change', () => {
+      state.outcomeTarget=tgtInput.value;
+      const c = outcomeColor(state.outcomeCurrent, state.outcomeTarget);
+      ring.style.color = c; ring.style.borderColor = c;
+      scheduleSave();
+    });
     const row2 = el('div','outcome-editrow'); row2.appendChild(curInput); row2.appendChild(tgtInput); box.appendChild(row2);
     ocPanel.appendChild(box);
     grid.appendChild(ocPanel);
