@@ -15,10 +15,11 @@
  *   CommitLog   — one row per "Commit Update" click, holds a JSON snapshot
  */
 
-const TEACHER_EMAIL = 'jvirak@lbschools.net'; // <-- CHANGE THIS
+const TEACHER_EMAIL = 'you@example.com'; // <-- CHANGE THIS
 
 const STATE_SHEET = 'BoardState';
 const LOG_SHEET = 'CommitLog';
+const ROSTER_SHEET = 'TeamRoster';
 
 function getSheet_(name, headerRow) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -35,6 +36,39 @@ function stateSheet_() {
 }
 function logSheet_() {
   return getSheet_(LOG_SHEET, ['Timestamp', 'TeamId', 'TeamName', 'SnapshotJSON']);
+}
+
+/**
+ * TeamRoster tab — YOU fill this in, students never see or touch it.
+ * Column B: comma-separated student emails for that team. Leave blank
+ * for a team you don't want CC'd yet.
+ */
+function rosterSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(ROSTER_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(ROSTER_SHEET);
+    sh.appendRow(['TeamId', 'Student Emails (comma-separated)']);
+    for (let i = 1; i <= 8; i++) sh.appendRow([String(i), '']);
+    sh.setColumnWidth(2, 360);
+  }
+  return sh;
+}
+
+const EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+
+function getTeamEmails_(teamId) {
+  const sh = rosterSheet_();
+  const data = sh.getDataRange().getValues();
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][0]) === String(teamId)) {
+      const raw = String(data[r][1] || '');
+      return raw.split(',')
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return EMAIL_RE.test(s); });
+    }
+  }
+  return [];
 }
 
 function getHistoryList_(teamId) {
@@ -213,6 +247,7 @@ function sendCommitEmail_(teamId, state) {
 
   MailApp.sendEmail({
     to: TEACHER_EMAIL,
+    cc: getTeamEmails_(teamId).join(','), // blank string is fine — MailApp just omits an empty cc
     subject: 'SDD Commit — ' + (state.sprintName || ('Team ' + teamId)),
     htmlBody: html
   });
