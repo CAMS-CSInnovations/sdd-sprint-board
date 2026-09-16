@@ -236,8 +236,12 @@
 
   function poll(){
     if (readOnlyMode) return;
-    // Skip merging server state right after a local edit, so we don't overwrite
-    // what the student just typed before the save round-trip completes.
+    // Never redraw while someone's actively typing anywhere on the page —
+    // a mid-typing redraw would wipe out whatever they haven't submitted yet.
+    const active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
+    // Also skip right after a local edit, so a just-submitted item isn't
+    // immediately overwritten by a server read that hasn't caught up yet.
     if (Date.now() - lastLocalEditAt < 2500) return;
     apiGet().then((res) => {
       if (res && res.ok && res.state) { state = res.state; renderAll(); }
