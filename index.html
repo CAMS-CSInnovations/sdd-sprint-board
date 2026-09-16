@@ -166,7 +166,7 @@
     btn.disabled = true; btn.textContent = 'Sending…';
     apiPost({ action: 'commit', team: TEAM, state: state }).then((res) => {
       btn.disabled = false; btn.textContent = '📨 Commit Update';
-      msg.textContent = (res && res.ok) ? 'Sent — your teacher has the full board snapshot.' : 'Something went wrong sending that. Try again.';
+      msg.textContent = (res && res.ok) ? 'Sent — your teacher has the full board snapshot.' : ('Error: ' + ((res && res.error) || 'could not reach the server. Try again.'));
       setTimeout(() => { msg.textContent = ''; }, 6000);
     });
   }
