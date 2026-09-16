@@ -15,7 +15,7 @@
  *   CommitLog   — one row per "Commit Update" click, holds a JSON snapshot
  */
 
-const TEACHER_EMAIL = 'you@example.com'; // <-- CHANGE THIS
+const TEACHER_EMAIL = 'jvirak@lbschools.net'; // <-- CHANGE THIS
 
 const STATE_SHEET = 'BoardState';
 const LOG_SHEET = 'CommitLog';
