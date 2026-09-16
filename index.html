@@ -70,10 +70,30 @@
   .colorpicker button.color-cyan { background:var(--cyan); }
   .designnote { background:var(--bg); border:1px dashed var(--border-strong); border-radius:6px; padding:7px 8px; font-size:12.5px; }
   .noteam { max-width:500px; margin:60px auto; text-align:center; color:var(--text-dim); }
+
+  .historybtn { background:var(--panel); color:var(--blue); border:1.5px solid var(--blue); border-radius:8px; padding:8px 16px; font-size:13.5px; font-weight:600; cursor:pointer; }
+  .historybtn:hover { background:var(--bg); }
+  .roBanner { display:none; align-items:center; justify-content:space-between; gap:10px; background:#fff3cd; color:#7a5b00; border:1px solid #e0c060; border-radius:8px; padding:8px 12px; font-size:13px; margin-bottom:12px; }
+  .roBanner.show { display:flex; }
+  .roBanner button { background:var(--blue); color:#fff; border:none; border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer; }
+
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:60; }
+  .modal-box { background:var(--panel); border-radius:10px; padding:16px 18px; width:420px; max-width:92vw; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 6px 24px rgba(0,0,0,.3); }
+  .modal-box h3 { margin:0 0 4px; font-size:15px; color:var(--blue); }
+  .modal-box p.sub { margin:0 0 10px; font-size:12px; color:var(--text-dim); }
+  .modal-list { overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:6px; }
+  .modal-row { display:flex; align-items:center; justify-content:space-between; gap:8px; border:1px solid var(--border); border-radius:8px; padding:8px 10px; }
+  .modal-row .mrow-info { font-size:12.5px; }
+  .modal-row .mrow-info .mtime { font-weight:700; color:var(--text); }
+  .modal-row .mrow-info .mname { color:var(--text-dim); }
+  .modal-row button { background:var(--accent); color:#fff; border:none; border-radius:6px; padding:5px 10px; font-size:12px; cursor:pointer; }
+  .modal-empty { font-size:13px; color:var(--text-dim); padding:10px 0; }
+  .modal-close { align-self:flex-end; margin-top:10px; background:none; border:1px solid var(--border); color:var(--text-dim); border-radius:6px; padding:5px 12px; font-size:12.5px; cursor:pointer; }
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="modalRoot"></div>
 <script src="config.js"></script>
 <script>
 (function(){
@@ -95,6 +115,9 @@
   let state = defaultState();
   let saveTimer = null;
   let lastLocalEditAt = 0;
+  let readOnlyMode = false;
+  let liveStateBackup = null;
+  let viewingLabel = '';
 
   function defaultState(){
     return {
@@ -120,8 +143,15 @@
       body: JSON.stringify(payload)
     }).then(r => r.json()).catch(() => null);
   }
+  function apiGetHistoryList(){
+    return fetch(APPS_SCRIPT_URL + '?team=' + encodeURIComponent(TEAM) + '&history=list').then(r => r.json());
+  }
+  function apiGetHistorySnapshot(id){
+    return fetch(APPS_SCRIPT_URL + '?team=' + encodeURIComponent(TEAM) + '&history=get&id=' + encodeURIComponent(id)).then(r => r.json());
+  }
 
   function scheduleSave(){
+    if (readOnlyMode) return;
     lastLocalEditAt = Date.now();
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -130,6 +160,7 @@
   }
 
   function commitUpdate(){
+    if (readOnlyMode) return;
     const btn = document.getElementById('commitBtn');
     const msg = document.getElementById('commitMsg');
     btn.disabled = true; btn.textContent = 'Sending…';
@@ -140,7 +171,71 @@
     });
   }
 
+  // ---------- sprint history ----------
+  function openHistory(){
+    const root = document.getElementById('modalRoot');
+    root.innerHTML = '';
+    const backdrop = el('div','modal-backdrop');
+    const box = el('div','modal-box');
+    box.appendChild(el('h3','','Sprint History'));
+    box.appendChild(el('p','sub','Past commits for this team. Pick one to view it (read-only).'));
+    const list = el('div','modal-list');
+    box.appendChild(list);
+    const closeBtn = el('button','modal-close','Close');
+    closeBtn.addEventListener('click', () => { root.innerHTML=''; });
+    box.appendChild(closeBtn);
+    backdrop.appendChild(box);
+    root.appendChild(backdrop);
+
+    list.innerHTML = '<div class="modal-empty">Loading…</div>';
+    apiGetHistoryList().then((res) => {
+      list.innerHTML = '';
+      const commits = (res && res.ok && res.commits) || [];
+      if (!commits.length){
+        list.appendChild(el('div','modal-empty','No commits yet — click "Commit Update" to create the first one.'));
+        return;
+      }
+      commits.forEach((c) => {
+        const row = el('div','modal-row');
+        const info = el('div','mrow-info');
+        const d = new Date(c.timestamp);
+        info.appendChild(el('div','mtime', d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
+        info.appendChild(el('div','mname', c.sprintName || ''));
+        row.appendChild(info);
+        const viewBtn = el('button','','View');
+        viewBtn.addEventListener('click', () => {
+          root.innerHTML = '';
+          loadHistorySnapshot(c.id, d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+        });
+        row.appendChild(viewBtn);
+        list.appendChild(row);
+      });
+    });
+  }
+
+  function loadHistorySnapshot(id, label){
+    apiGetHistorySnapshot(id).then((res) => {
+      if (!res || !res.ok || !res.state) return;
+      if (!readOnlyMode) liveStateBackup = state; // only back up the true live state, not a prior history view
+      state = res.state;
+      readOnlyMode = true;
+      viewingLabel = label;
+      document.getElementById('roBanner').classList.add('show');
+      document.getElementById('roBannerText').textContent = 'Viewing Sprint History from ' + label + ' — read-only.';
+      renderAll();
+    });
+  }
+
+  function exitHistory(){
+    if (liveStateBackup) state = liveStateBackup;
+    readOnlyMode = false;
+    liveStateBackup = null;
+    document.getElementById('roBanner').classList.remove('show');
+    renderAll();
+  }
+
   function poll(){
+    if (readOnlyMode) return;
     // Skip merging server state right after a local edit, so we don't overwrite
     // what the student just typed before the save round-trip completes.
     if (Date.now() - lastLocalEditAt < 2500) return;
@@ -150,14 +245,14 @@
   }
 
   // ---------- mutations ----------
-  function addToList(key, text){ text=(text||'').trim(); if(!text) return; state[key]=(state[key]||[]).concat([text]); scheduleSave(); renderAll(); }
-  function removeFromList(key, idx){ const l=(state[key]||[]).slice(); l.splice(idx,1); state[key]=l; scheduleSave(); renderAll(); }
-  function addRetro(text){ text=(text||'').trim(); if(!text) return; state.retroActions=(state.retroActions||[]).concat([{text,done:false}]); scheduleSave(); renderAll(); }
-  function toggleRetro(idx){ const l=(state.retroActions||[]).slice(); if(l[idx]) l[idx]=Object.assign({},l[idx],{done:!l[idx].done}); state.retroActions=l; scheduleSave(); renderAll(); }
-  function removeRetro(idx){ const l=(state.retroActions||[]).slice(); l.splice(idx,1); state.retroActions=l; scheduleSave(); renderAll(); }
-  function addCard(column, text, color){ text=(text||'').trim(); if(!text) return; state.cards=(state.cards||[]).concat([{id:'c'+Date.now()+Math.random(),text,column,color:color||'yellow',createdAt:Date.now()}]); scheduleSave(); renderBoard(); }
-  function moveCard(id, col){ state.cards=(state.cards||[]).map(c => c.id===id ? Object.assign({},c,{column:col}) : c); scheduleSave(); renderBoard(); }
-  function deleteCard(id){ state.cards=(state.cards||[]).filter(c => c.id!==id); scheduleSave(); renderBoard(); }
+  function addToList(key, text){ if(readOnlyMode) return; text=(text||'').trim(); if(!text) return; state[key]=(state[key]||[]).concat([text]); scheduleSave(); renderAll(); }
+  function removeFromList(key, idx){ if(readOnlyMode) return; const l=(state[key]||[]).slice(); l.splice(idx,1); state[key]=l; scheduleSave(); renderAll(); }
+  function addRetro(text){ if(readOnlyMode) return; text=(text||'').trim(); if(!text) return; state.retroActions=(state.retroActions||[]).concat([{text,done:false}]); scheduleSave(); renderAll(); }
+  function toggleRetro(idx){ if(readOnlyMode) return; const l=(state.retroActions||[]).slice(); if(l[idx]) l[idx]=Object.assign({},l[idx],{done:!l[idx].done}); state.retroActions=l; scheduleSave(); renderAll(); }
+  function removeRetro(idx){ if(readOnlyMode) return; const l=(state.retroActions||[]).slice(); l.splice(idx,1); state.retroActions=l; scheduleSave(); renderAll(); }
+  function addCard(column, text, color){ if(readOnlyMode) return; text=(text||'').trim(); if(!text) return; state.cards=(state.cards||[]).concat([{id:'c'+Date.now()+Math.random(),text,column,color:color||'yellow',createdAt:Date.now()}]); scheduleSave(); renderBoard(); }
+  function moveCard(id, col){ if(readOnlyMode) return; state.cards=(state.cards||[]).map(c => c.id===id ? Object.assign({},c,{column:col}) : c); scheduleSave(); renderBoard(); }
+  function deleteCard(id){ if(readOnlyMode) return; state.cards=(state.cards||[]).filter(c => c.id!==id); scheduleSave(); renderBoard(); }
 
   // ---------- rendering ----------
   function makeListPanel(opts){
@@ -317,10 +412,13 @@
     app.innerHTML = ''
       + '<h1 class="pagehead">🗂️ SDD Capstone Sprint Board <span class="sub">— Team ' + TEAM + '</span></h1>'
       + '<div class="statusline" id="statusline">Loading…</div>'
-      + '<div class="commitbar"><button class="commitbtn" id="commitBtn">📨 Commit Update</button><span class="commitmsg" id="commitMsg"></span></div>'
+      + '<div class="roBanner" id="roBanner"><span id="roBannerText"></span><button id="exitHistoryBtn">← Back to live board</button></div>'
+      + '<div class="commitbar"><button class="commitbtn" id="commitBtn">📨 Commit Update</button><button class="historybtn" id="historyBtn">📜 Sprint History</button><span class="commitmsg" id="commitMsg"></span></div>'
       + '<div class="top-grid" id="topGrid"></div>'
       + '<div class="board-scroll"><div class="board" id="board"></div></div>';
     document.getElementById('commitBtn').addEventListener('click', commitUpdate);
+    document.getElementById('historyBtn').addEventListener('click', openHistory);
+    document.getElementById('exitHistoryBtn').addEventListener('click', exitHistory);
   }
 
   buildShell();

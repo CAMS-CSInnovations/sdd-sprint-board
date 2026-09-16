@@ -15,7 +15,7 @@
  *   CommitLog   — one row per "Commit Update" click, holds a JSON snapshot
  */
 
-const TEACHER_EMAIL = 'jvirak@lbschools.net'; 
+const TEACHER_EMAIL = 'you@example.com'; // <-- CHANGE THIS
 
 const STATE_SHEET = 'BoardState';
 const LOG_SHEET = 'CommitLog';
@@ -35,6 +35,32 @@ function stateSheet_() {
 }
 function logSheet_() {
   return getSheet_(LOG_SHEET, ['Timestamp', 'TeamId', 'TeamName', 'SnapshotJSON']);
+}
+
+function getHistoryList_(teamId) {
+  const sh = logSheet_();
+  const data = sh.getDataRange().getValues();
+  const out = [];
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][1]) === String(teamId)) {
+      out.push({ id: r + 1, timestamp: data[r][0], sprintName: data[r][2] });
+    }
+  }
+  out.sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+  return out;
+}
+
+function getHistorySnapshot_(teamId, id) {
+  const sh = logSheet_();
+  const row = parseInt(id, 10);
+  if (!row || row < 2) return null;
+  const rowVals = sh.getRange(row, 1, 1, 4).getValues()[0];
+  if (String(rowVals[1]) !== String(teamId)) return null;
+  try {
+    return JSON.parse(rowVals[3]);
+  } catch (e) {
+    return null;
+  }
 }
 
 function findTeamRow_(sheet, teamId) {
@@ -84,6 +110,17 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify({ error: 'missing team param' }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+
+  if (e.parameter.history === 'list') {
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, commits: getHistoryList_(teamId) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (e.parameter.history === 'get') {
+    const snap = getHistorySnapshot_(teamId, e.parameter.id);
+    return ContentService.createTextOutput(JSON.stringify({ ok: !!snap, state: snap }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   const state = getState_(teamId);
   return ContentService.createTextOutput(JSON.stringify({ ok: true, state: state }))
     .setMimeType(ContentService.MimeType.JSON);
