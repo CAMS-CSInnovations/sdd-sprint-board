@@ -151,9 +151,12 @@
   function apiPost(payload){
     return fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids CORS preflight
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
-    }).then(r => r.json()).catch(() => null);
+    }).then(r => r.json()).catch((err) => {
+      console.error('apiPost failed:', err);
+      return null;
+    });
   }
   function apiGetHistoryList(){
     return fetch(APPS_SCRIPT_URL + '?team=' + encodeURIComponent(TEAM) + '&history=list').then(r => r.json());
