@@ -23,7 +23,7 @@
 
 const CONFIG = {
   // Where commit and finish emails are copied, and the email you type to open the teacher view.
-  TEACHER_EMAIL: 'CHANGE_ME@lbschools.net',
+  TEACHER_EMAIL: 'jvirak@lbschools.net',
 
   // Student emails: exactly 9 digits + @lbschools.net
   EMAIL_PATTERN: /^\d{9}@lbschools\.net$/,
