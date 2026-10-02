@@ -79,6 +79,7 @@ const ROLE_ALIASES = {
 };
 
 const PASSCODE_PROP = 'TEACHER_PASSCODE';
+const DEMO_PROP = 'DEMO_SIGNIN_OPEN';   // 'yes' lets the demo address sign in from the main page
 const MAX_PASSCODE_TRIES = 5;   // then locked for 10 minutes
 
 /* ===== SHARED BOARD RULES: identical copy in index.html and Code.gs. Edit both together. ===== */
@@ -725,6 +726,11 @@ function who_(req) {
     throw new Error('Use your school email: your 9-digit student ID followed by @lbschools.net.');
   }
   if (email === normEmail_(CONFIG.DEMO_EMAIL)) {
+    // From the teacher view (passcode sent along) the demo always opens. From the main page it opens
+    // only while "Allow demo sign-in" is checked; otherwise it looks like any address not on the roster.
+    if (!demoOpen_() && teacherCheck_(normEmail_(req.tEmail), req.tCode)) {
+      throw new Error("That email isn't on the CSI roster. Double-check your 9 digits, then ask your teacher to add you.");
+    }
     const members = withColors_(DEMO_MEMBERS.map(m => Object.assign({ email: '' }, m)));
     return { demo: true, email: email, team: DEMO_TEAM, me: members.filter(m => m.key === 'demo-me')[0], members: members };
   }
@@ -800,23 +806,25 @@ function commit_(w) {
  *  Teacher view
  * ================================================================ */
 
-function teacher_(email, req) {
-  if (/CHANGE_ME/i.test(CONFIG.TEACHER_EMAIL)) {
-    return { ok: false, error: "The teacher view isn't set up yet. Set TEACHER_EMAIL in Code.gs, then redeploy." };
-  }
-  if (email !== normEmail_(CONFIG.TEACHER_EMAIL)) {
-    return { ok: false, error: "That email isn't set up as the teacher account for this board." };
-  }
+// Returns an error message, or '' when the email and passcode are the teacher's.
+function teacherCheck_(email, code) {
+  if (/CHANGE_ME/i.test(CONFIG.TEACHER_EMAIL)) return "The teacher view isn't set up yet. Set TEACHER_EMAIL in Code.gs, then redeploy.";
+  if (email !== normEmail_(CONFIG.TEACHER_EMAIL)) return "That email isn't set up as the teacher account for this board.";
   const saved = PropertiesService.getScriptProperties().getProperty(PASSCODE_PROP);
-  if (!saved) return { ok: false, error: 'No teacher passcode yet. In the Sheet, choose CSI Sprint Board > Set teacher passcode.' };
+  if (!saved) return 'No teacher passcode yet. In the Sheet, choose CSI Sprint Board > Set teacher passcode.';
   const cache = CacheService.getScriptCache();
   const fails = Number(cache.get('teacherFails') || 0);
-  if (fails >= MAX_PASSCODE_TRIES) return { ok: false, error: 'Too many wrong passcodes. Wait 10 minutes, then try again.' };
-  if (String(req.code || '') !== saved) {
-    cache.put('teacherFails', String(fails + 1), 600);
-    return { ok: false, error: 'That passcode is wrong.' };
-  }
+  if (fails >= MAX_PASSCODE_TRIES) return 'Too many wrong passcodes. Wait 10 minutes, then try again.';
+  if (String(code || '') !== saved) { cache.put('teacherFails', String(fails + 1), 600); return 'That passcode is wrong.'; }
   cache.remove('teacherFails');
+  return '';
+}
+
+function demoOpen_() { return PropertiesService.getScriptProperties().getProperty(DEMO_PROP) === 'yes'; }
+
+function teacher_(email, req) {
+  const bad = teacherCheck_(email, req.code);
+  if (bad) return { ok: false, error: bad };
 
   switch (req.action) {
     case 'teacherList': return teacherList_();
@@ -825,6 +833,9 @@ function teacher_(email, req) {
     case 'teacherSetRole': return withLock_(() => setRole_(normEmail_(req.student), req.role, req.intern));
     case 'teacherEmailLeads': return emailLeads_(String(req.team || ''), req.subject, req.message, !!req.copyMe);
     case 'teacherHistory': return { ok: true, snapshot: historySnapshot_(String(req.team || ''), req.sprintNo) };
+    case 'teacherDemoSignin':
+      PropertiesService.getScriptProperties().setProperty(DEMO_PROP, req.on ? 'yes' : 'no');
+      return { ok: true, demoOpen: demoOpen_() };
     case 'teacherResetDemo': return withLock_(() => { deleteTeam_(DEMO_TEAM); return { ok: true }; });
     default: return { ok: false, error: 'Unknown action.' };
   }
@@ -862,7 +873,8 @@ function teacherList_() {
     quota: quota,
     sender: senderEmail_(),
     demo: demoRec ? teamSummary_(DEMO_TEAM, withColors_(DEMO_MEMBERS.slice()), demoRec, hist[DEMO_TEAM] || []) : null,
-    demoEmail: normEmail_(CONFIG.DEMO_EMAIL)
+    demoEmail: normEmail_(CONFIG.DEMO_EMAIL),
+    demoOpen: demoOpen_()
   };
 }
 

@@ -243,6 +243,7 @@ li.empty{ color:var(--muted); font-size:.9rem; font-style:italic; padding:6px 0;
 .demo-line{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:14px 0 0; padding:10px 12px;
   border:1.5px dashed var(--rule); border-radius:8px; font-size:.92rem; }
 .demo-line span{ flex:1 1 260px; }
+.demo-allow{ flex-basis:100%; margin:0; font-size:.9rem; }
 .issues{ margin:14px 0 0; padding:8px 12px; border:1.5px solid var(--warn); border-left-width:6px; border-radius:8px; }
 .issues summary{ cursor:pointer; font-weight:700; }
 .issues ul{ margin:8px 0 4px; padding-left:20px; font-size:.9rem; }
@@ -366,6 +367,7 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
         <span id="demoInfo"></span>
         <button class="small" id="demoOpenBtn" type="button">Open demo board</button>
         <button class="ghost small" id="demoResetBtn" type="button">Clear demo board</button>
+        <label class="check demo-allow" for="demoAllow"><input id="demoAllow" type="checkbox"> Allow demo sign-in from the main page</label>
       </div>
       <details class="issues" id="issues" hidden><summary id="issuesSum"></summary><ul id="issuesList"></ul></details>
       <div class="tabs" role="tablist" aria-label="Teacher view">
@@ -509,7 +511,7 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
    SETUP: paste your Apps Script web app URL (ends in /exec) here.
    Leave it empty to preview the board without saving anything.
    ===================================================================== */
-const API_URL = 'https://script.google.com/macros/s/AKfycbx5L_wx-xGLTJN_Mf9t1TCcMPoJ0sLS2bBebXl70kWCfal4CIUDi6_5mTgR9dca-t_WTg/exec';
+const API_URL = '';
 
 const EMAIL_RE = /^\d{9}@lbschools\.net$/;
 // Teacher addresses start with a letter (first initial + last name, sometimes with a number).
@@ -1202,7 +1204,10 @@ async function post(body){
   if (!lastErr.server) lastErr.message = "Couldn't reach the board server. Check your connection and try again.";
   throw lastErr;
 }
-const api  = (action, payload = {}) => post({ action, email: state.user.email, first: state.user.first, last: state.user.last, ...payload });
+// When the teacher opens the demo board from the teacher view, the passcode rides along so the demo
+// opens even while "Allow demo sign-in" is unchecked.
+const api  = (action, payload = {}) => post({ action, email: state.user.email, first: state.user.first, last: state.user.last,
+  ...(state.teacher ? { tEmail: state.teacher.email, tCode: state.teacher.code } : {}), ...payload });
 const tapi = (action, payload = {}) => post({ action, email: state.teacher.email, code: state.teacher.code, ...payload });
 
 /* ---------------- Preview mode (no API_URL): a pretend server in memory ---------------- */
@@ -1225,7 +1230,7 @@ const pv = {
     { key:'pv-f', email:'100000006@lbschools.net', first:'Finley',  last:'Sample', team:'Team Nova',    role:'Developer',    intern:false },
     { key:'pv-g', email:'100000007@lbschools.net', first:'Gray',    last:'Sample', team:'Team Nova',    role:'',             intern:false }
   ],
-  boards:{}, versions:{}, updated:{}, history:{}, seen:{}, safe:{}
+  boards:{}, versions:{}, updated:{}, history:{}, seen:{}, safe:{}, demoOpen:false
 };
 const serverError = m => Object.assign(new Error(m), { server:true });
 const pub = m => ({ key:m.key, first:m.first, last:m.last, role:m.role || '', intern:!!m.intern, color:m.color });
@@ -1236,6 +1241,7 @@ const pvBoard = team => pv.boards[team] ? CSI.clone(pv.boards[team]) : CSI.blank
 function pvWho(p){
   if (!EMAIL_RE.test(p.email)) throw serverError('Use your school email: your 9-digit student ID followed by @lbschools.net.');
   if (p.email === PREVIEW_DEMO){
+    if (!pv.demoOpen && !p.tCode) throw serverError("That email isn't on the CSI roster. Double-check your 9 digits, then ask your teacher to add you.");
     const ms = pvMembers(DEMO_TEAM);
     return { demo:true, email:p.email, team:DEMO_TEAM, me:ms.find(m => m.key === 'demo-me'), members:ms };
   }
@@ -1304,7 +1310,7 @@ function previewTeacher(action, p){
         students: pv.people.map(x => CSI.studentRow(x, pvBoard(x.team), earlier(x.team, x.key), { safe:pv.safe[x.email], lastSeen:pv.seen[x.email] })),
         issues, roles:CSI.ROLES, quota:1500, sender:'your-teacher@lbschools.net',
         demo: pv.boards[DEMO_TEAM] ? CSI.teamSummary(DEMO_TEAM, pvMembers(DEMO_TEAM), pvBoard(DEMO_TEAM), true, (pv.history[DEMO_TEAM] || []).length, pv.updated[DEMO_TEAM]) : null,
-        demoEmail:PREVIEW_DEMO };
+        demoEmail:PREVIEW_DEMO, demoOpen:pv.demoOpen };
     }
     case 'teacherBoard':
       if (!pvMembers(team).length) throw serverError('Nobody on the roster is on that team.');
@@ -1329,6 +1335,7 @@ function previewTeacher(action, p){
       return { ok:true, sentTo:leads.map(m => `${m.first} ${m.last}`) };
     }
     case 'teacherHistory': return { ok:true, snapshot:pvSnap(team, p.sprintNo) };
+    case 'teacherDemoSignin': pv.demoOpen = !!p.on; return { ok:true, demoOpen:pv.demoOpen };
     case 'teacherResetDemo':
       delete pv.boards[DEMO_TEAM]; delete pv.versions[DEMO_TEAM]; delete pv.history[DEMO_TEAM]; delete pv.updated[DEMO_TEAM];
       return { ok:true };
@@ -1471,19 +1478,24 @@ function resetToSignin(){
 }
 
 /* ---------------- Sign in ---------------- */
-$('#emailIn').addEventListener('input', e => {
-  const v = e.target.value.trim().toLowerCase();
+// Swap the name boxes for the passcode box when a teacher address is in the email box.
+// Runs on typing, on paste/autofill (change), and when the page loads.
+function syncSigninMode(){
+  const v = $('#emailIn').value.trim().toLowerCase();
   const t = isTeacherEmail(v);
   $('#codeWrap').hidden = !t;
   $('#nameWrap').hidden = t;
+  $('#emailHint').textContent = t ? 'Teacher sign-in: enter the passcode you set in the Sheet.'
+    : 'Your 9-digit student ID, then @lbschools.net. Use the name your teacher has on the roster.';
   $('#signinBtn').textContent = t ? 'Open teacher view' : "Open my team's board";
   $('#signinErr').textContent = (t || !v.includes('@')) ? '' : emailProblem(v);
-});
+}
+['input', 'change', 'blur'].forEach(ev => $('#emailIn').addEventListener(ev, syncSigninMode));
 
 $('#signinForm').addEventListener('submit', async e => {
   e.preventDefault();
   const email = $('#emailIn').value.trim().toLowerCase();
-  if (isTeacherEmail(email)) return teacherSignIn(email);
+  if (isTeacherEmail(email)){ syncSigninMode(); return teacherSignIn(email); }
   const first = $('#firstIn').value.trim(), last = $('#lastIn').value.trim();
   const err = m => { $('#signinErr').textContent = m; };
   if (email !== PREVIEW_DEMO && (!first || !last)){ err('Enter your first and last name.'); $(first ? '#lastIn' : '#firstIn').focus(); return; }
@@ -1601,6 +1613,14 @@ $('#demoResetBtn').addEventListener('click', async () => {
   try{ await tapi('teacherResetDemo'); await loadClass(); renderTeacher(); toast('Demo board cleared.'); }
   catch(e){ toast(e.message); }
 });
+$('#demoAllow').addEventListener('change', async e => {
+  const on = e.target.checked;
+  try{
+    const j = await tapi('teacherDemoSignin', { on });
+    state.teacher.data.demoOpen = j.demoOpen;
+    toast(on ? 'Demo sign-in is on. Uncheck it when you are done.' : 'Demo sign-in is off. Open demo board still works here.');
+  }catch(err){ e.target.checked = !on; toast(err.message); }
+});
 ['#tabTeams', '#tabStudents'].forEach(id => $(id).addEventListener('click', () => {
   const T = state.teacher; T.tab = id === '#tabTeams' ? 'teams' : 'students'; T.filter.chip = ''; renderTeacher();
 }));
@@ -1629,6 +1649,7 @@ function renderTeacher(){
     ? `Demo board (${D.demoEmail}): ${d.sprint}, ${d.cardsDone} of ${d.cardsTotal} cards done.`
     : `Demo board (${D.demoEmail}): empty and ready for a walkthrough.`;
   $('#demoResetBtn').disabled = !d;
+  $('#demoAllow').checked = !!D.demoOpen;
 
   const issues = D.issues || [];
   $('#issues').hidden = !issues.length;
@@ -2423,6 +2444,8 @@ try{
   const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
   if (saved && saved.email){ $('#firstIn').value = saved.first || ''; $('#lastIn').value = saved.last || ''; $('#emailIn').value = saved.email; }
 }catch(_){}
+syncSigninMode();
+setTimeout(syncSigninMode, 600);   // catches browser autofill after load
 </script>
 </body>
 </html>
