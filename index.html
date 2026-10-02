@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>CSI Sprint Board</title>
+<title>Computer Science Innovations Sprint Board</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,7 +42,9 @@ button,input,select,textarea{ font:inherit; color:inherit; }
 .top{ display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px 24px;
   padding:18px clamp(14px,3vw,32px) 14px; border-bottom:2px solid var(--rule); background:var(--panel); }
 .brand h1{ margin:0; font:700 clamp(1.7rem,3.2vw,2.3rem)/1 var(--hand); letter-spacing:.2px; }
+.tagline{ margin:4px 0 0; font:700 clamp(1.15rem,2vw,1.4rem)/1.1 var(--hand); color:var(--marker); }
 .who{ margin:6px 0 0; color:var(--muted); font-size:.95rem; }
+.who:empty{ display:none; }
 .top-actions{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .sync{ font-size:.85rem; color:var(--muted); min-width:9ch; }
 .sync.bad{ color:var(--danger); }
@@ -299,8 +301,9 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
 
 <header class="top">
   <div class="brand">
-    <h1>CSI Sprint Board</h1>
-    <p class="who" id="who">Computer Science Innovations</p>
+    <h1>Computer Science Innovations</h1>
+    <p class="tagline">Sprint Board</p>
+    <p class="who" id="who"></p>
   </div>
   <div class="top-actions" id="topActions" hidden>
     <span class="sync" id="sync" aria-live="polite"></span>
@@ -1133,7 +1136,7 @@ const COLUMNS = [
 ].map(c => Object.assign(c, { name: CSI.COLUMN_NAMES[c.id] }));
 const RESULT_CLASS = { met:'r-met', partly:'r-partly', missed:'r-missed' };
 const CRIT_STATE_LABEL = { none:'Not started', progress:'In progress', claimed:'Claimed met, waiting for teacher', met:'Met' };
-const DEFAULT_WHO = 'Computer Science Innovations';
+const DEFAULT_WHO = '';
 const LS_KEY = 'csiBoardUser';
 
 const $ = s => document.querySelector(s);
