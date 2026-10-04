@@ -321,7 +321,7 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
 
 <header class="top">
   <div class="brand">
-    <h1>Computer Science Innovations</h1>
+    <h1 id="courseName">Computer Science Innovations</h1>
     <p class="tagline">Sprint Board</p>
     <p class="who" id="who"></p>
   </div>
@@ -387,6 +387,11 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
         <button class="small" id="demoOpenBtn" type="button">Open demo board</button>
         <button class="ghost small" id="demoResetBtn" type="button">Clear demo board</button>
         <label class="check demo-allow" for="demoAllow"><input id="demoAllow" type="checkbox"> Allow demo sign-in from the main page</label>
+        <label class="demo-allow" id="roleModeRow" hidden>Roles
+          <select id="roleMode" aria-label="How roles are assigned">
+            <option value="rotating">Rotating: Lead, Coder, Tester change each sprint</option>
+            <option value="roster">Roster: the roles from the Roster tab (PM, Developer, and so on)</option>
+          </select></label>
       </div>
       <details class="issues" id="issues" hidden><summary id="issuesSum"></summary><ul id="issuesList"></ul></details>
       <div class="tabs" role="tablist" aria-label="Teacher view">
@@ -530,8 +535,10 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
    SETUP: paste your Apps Script web app URL (ends in /exec) here.
    Leave it empty to preview the board without saving anything.
    ===================================================================== */
-const API_URL = 'https://script.google.com/macros/s/AKfycbxdlCZwvrNb3QABitCs2_WJs-WXpdMiS6nSAPnMqH-c0Cdb3wGaY6scA72x63R7lTAMdg/exec';
-                 
+const API_URL = 'https://script.google.com/macros/s/AKfycbx5L_wx-xGLTJN_Mf9t1TCcMPoJ0sLS2bBebXl70kWCfal4CIUDi6_5mTgR9dca-t_WTg/exec';
+// Which course this board serves: 'csi' or 'csa'. Must match COURSE in Code.gs.
+const COURSE_ID = 'csi';
+
 const EMAIL_RE = /^\d{9}@lbschools\.net$/;
 // Teacher addresses start with a letter (first initial + last name, sometimes with a number).
 const TEACHER_RE = /^[a-z][a-z0-9._-]*@lbschools\.net$/;
@@ -543,7 +550,16 @@ const CSI = (function () {
   const COLUMNS = ['pick', 'dev', 'test', 'review', 'deploy', 'done'];
   const COLUMN_NAMES = { pick: 'Pick Me', dev: 'Dev', test: 'Test', review: 'Review', deploy: 'Deploy', done: 'Done' };
   const ROLES = ['PM', 'Asst PM', 'Developer', 'UX/UI Designer', 'Asset Artist', 'QA Tester', 'Marketing & Outreach'];
-  const LEAD_ROLES = ['PM', 'Asst PM'];
+  // Rotating roles (CSA): the board assigns these from the sprint number. Lead does the PM's jobs.
+  const ROTATING = ['Lead', 'Coder', 'Tester'];
+  const LEAD_ROLES = ['PM', 'Asst PM', 'Lead'];
+  const SIZES = ['S', 'M', 'L'];
+  // One engine, several courses. maxGroup 0 means no limit.
+  const COURSES = {
+    csi: { id: 'csi', name: 'Computer Science Innovations', maxGroup: 0, criteria: true, interns: true, sizes: false, rotating: false },
+    csa: { id: 'csa', name: 'AP Computer Science A', maxGroup: 3, criteria: false, interns: false, sizes: true, rotating: true }
+  };
+  const courseOf = id => COURSES[id] || COURSES.csi;
   const ASSET_TYPES = ['Image', 'Sound', 'Font', 'Data', 'Library/API', 'Mockup', 'Hardware', 'Other'];
   const RESULTS = { met: 'Met', partly: 'Partly met', missed: 'Missed' };
   const CRIT_STATUS = ['draft', 'submitted', 'returned', 'approved'];
@@ -556,9 +572,14 @@ const CSI = (function () {
   const T = (v, n) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, n);
   const short = t => (t.length > 40 ? t.slice(0, 38) + '…' : t);
   // A student can hold up to MAX.roles roles, stored in one cell as "PM + Developer".
-  const rolesOf = m => String((m && m.role) || '').split('+').map(r => r.trim()).filter(r => ROLES.indexOf(r) >= 0);
+  const rolesOf = m => String((m && m.role) || '').split('+').map(r => r.trim()).filter(r => ROLES.indexOf(r) >= 0 || ROTATING.indexOf(r) >= 0);
   const hasRole = (m, r) => rolesOf(m).indexOf(r) >= 0;
   const joinRoles = list => ROLES.filter(r => list.indexOf(r) >= 0).join(' + ');
+  // Same teammates, roles passed to the next person each sprint (Lead goes 1st, 2nd, 3rd...). Solo is always Lead.
+  function rotate(members, sprintNo) {
+    const n = members.length, names = ROTATING.slice(0, Math.max(1, Math.min(n, ROTATING.length)));
+    return members.map((m, i) => Object.assign({}, m, { role: names[((i - (sprintNo - 1)) % n + n) % n] || 'Coder', intern: false }));
+  }
   const isLead = m => LEAD_ROLES.some(r => hasRole(m, r));
   const capOf = m => (m && m.intern ? MAX.internGoals : MAX.goals);
   const nameOf = m => (m ? (m.first + ' ' + m.last).trim() : 'A former teammate');
@@ -586,6 +607,7 @@ const CSI = (function () {
       id: id(c.id), text: s(c.text, 200), goalId: id(c.goalId), owner: id(c.owner),
       col: COLUMNS.indexOf(c.col) >= 0 ? c.col : 'pick', code: !!c.code,
       blocked: !!c.blocked, blockNote: s(c.blockNote, 160), review: review(c.review), seed: !!c.seed,
+      size: SIZES.indexOf(c.size) >= 0 ? c.size : '',
       helpers: arr(c.helpers).map(id).filter(Boolean).slice(0, MAX.helpers)
     });
     const goal = g => ({ id: id(g.id), text: s(g.text, 160), owner: id(g.owner), color: hex(g.color), acId: id(g.acId) });
@@ -652,10 +674,13 @@ const CSI = (function () {
   }
   function newCard(o) {
     return { id: o.id, text: o.text, goalId: o.goalId || '', owner: o.owner || '', col: o.col || 'pick',
-      code: !!o.code, blocked: false, blockNote: '', review: null, seed: !!o.seed, helpers: [] };
+      code: !!o.code, blocked: false, blockNote: '', review: null, seed: !!o.seed, size: SIZES.indexOf(o.size) >= 0 ? o.size : '', helpers: [] };
   }
   function findCard(b, id) { return b.cards.filter(c => c.id === id)[0] || fail('A teammate deleted that card.'); }
-  function needLead(a, what) { if (!isLead(a)) fail('Only the PM or Asst PM can ' + what + '.'); }
+  function needLead(a, what) {
+    if (isLead(a)) return;
+    fail('Only ' + (a && rolesOf(a).some(r => ROTATING.indexOf(r) >= 0) ? "this sprint's Lead" : 'the PM or Asst PM') + ' can ' + what + '.');
+  }
   function critEditable(b) {
     if (b.criteria.status === 'submitted') fail('Your criteria are waiting for teacher approval. Pull them back to edit.');
     if (b.criteria.status === 'approved') fail('Your criteria are approved and locked. Use "Request a change" instead.');
@@ -731,7 +756,7 @@ const CSI = (function () {
         if (!b.goals.some(g => g.id === c.goalId)) fail('Pick the Sprint Goal this card belongs to.');
         const owner = memberOf(ctx.members, c.owner) || a;
         if (b.cards.length >= MAX.cards) fail('The board is full. Delete some cards or finish the sprint.');
-        b.cards.push(newCard({ id: c.id, text: text, goalId: c.goalId, owner: owner.key, code: !!c.code }));
+        b.cards.push(newCard({ id: c.id, text: text, goalId: c.goalId, owner: owner.key, code: !!c.code, size: c.size }));
         break;
       }
 
@@ -748,6 +773,7 @@ const CSI = (function () {
           c.helpers = (c.helpers || []).filter(h => h !== m.key);
         }
         if (op.code != null) c.code = !!op.code;
+        if (op.size != null) c.size = SIZES.indexOf(op.size) >= 0 ? op.size : '';
         break;
       }
 
@@ -778,7 +804,7 @@ const CSI = (function () {
           if (c.review) return result;
           if (c.col !== 'review') fail('Move the card to Review first.');
           if (a.intern) fail("Interns don't sign off reviews. A full team member reviews this card.");
-          if (a.key === c.owner) {
+          if (a.key === c.owner && ctx.members.length > 1) {
             if (!op.override) fail("You can't review your own card. Ask a teammate.");
             needLead(a, 'approve their own card');
           }
@@ -926,6 +952,7 @@ const CSI = (function () {
       }
 
       case 'addCriterion': {
+        if (!courseOf(ctx.course).criteria) fail('This course does not use acceptance criteria.');
         needLead(a, 'edit acceptance criteria');
         if (b.criteria.items.some(i => i.id === op.id)) return result;
         critEditable(b);
@@ -1043,6 +1070,13 @@ const CSI = (function () {
     return result;
   }
 
+  // In rotating mode, roles come from the board's current sprint, not the roster.
+  function withRoles(ctx, b) {
+    if (!ctx.rotate) return ctx;
+    const members = rotate(ctx.members, b.sprintNo);
+    return Object.assign({}, ctx, { members: members, actor: ctx.actor ? memberOf(members, ctx.actor.key) : null });
+  }
+
   /* Run a batch of changes. Each change is all-or-nothing; a rejected one is skipped and reported. */
   function run(board, ops, ctx) {
     let b = board;
@@ -1051,7 +1085,7 @@ const CSI = (function () {
     (Array.isArray(ops) ? ops : []).slice(0, MAX.ops).forEach(op => {
       const trial = clone(b);
       try {
-        const r = applyOp(trial, op || {}, ctx);
+        const r = applyOp(trial, op || {}, withRoles(ctx, b));
         events = events.concat(helpEvents(b, trial, ctx.actor ? ctx.actor.key : ''));
         b = trial; applied++;
         if (r && r.snapshot) finished.push(r.snapshot);
@@ -1160,7 +1194,7 @@ const CSI = (function () {
     const items = b.criteria.items;
     const count = s => items.filter(i => critState(b, i) === s).length;
     return {
-      team: team, pm: lead('PM'), asst: lead('Asst PM'), size: members.length,
+      team: team, pm: lead('PM') || lead('Lead'), asst: lead('Asst PM'), size: members.length,
       interns: members.filter(m => m.intern).length,
       sprintNo: b.sprintNo, sprint: b.sprint,
       status: b.start ? 'In progress' : (opened ? 'Between sprints' : 'Not opened'),
@@ -1200,7 +1234,7 @@ const CSI = (function () {
   }
 
   return {
-    COLUMNS, COLUMN_NAMES, ROLES, LEAD_ROLES, ASSET_TYPES, RESULTS, PALETTE, MAX, DEFAULT_CAKE,
+    COLUMNS, COLUMN_NAMES, ROLES, LEAD_ROLES, ROTATING, SIZES, COURSES, courseOf, rotate, withRoles, ASSET_TYPES, RESULTS, PALETTE, MAX, DEFAULT_CAKE,
     blank, sanitize, applyOp, run, clone, teamStats, memberStats, critState, finishWarnings,
     isLead, rolesOf, hasRole, joinRoles, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner, helpEvents, helpTally
   };
@@ -1346,6 +1380,9 @@ function pvSnap(team, n){
   return CSI.clone(s);
 }
 const pvHelp = {};   // preview copy of the teacher-only HelpLog tab
+let pvRoleMode = 'rotating';
+const pvRotate = () => COURSE.rotating && pvRoleMode !== 'roster';
+const pvView = t => pvRotate() ? CSI.rotate(pvMembers(t), pvBoard(t).sprintNo) : pvMembers(t);
 function pvLogHelp(team, events){
   if (team === DEMO_TEAM) return;
   const nm = k => { const m = CSI.memberOf(pvMembers(team), k); return m ? `${m.first} ${m.last}` : ''; };
@@ -1374,9 +1411,9 @@ function previewApi(action, p){
     case 'signin':
       pv.seen[w.email] = new Date().toISOString();
       return { ok:true, demo:w.demo, team:w.team, me:pub(w.me), members:w.members.map(pub), board:pvBoard(w.team),
-        version:v, history:pvHistList(w.team), safe:!!pv.safe[w.email], sender:'your-teacher@lbschools.net' };
-    case 'poll':    return v === Number(p.version) ? { ok:true, same:true } : { ok:true, board:pvBoard(w.team), version:v };
-    case 'ops':     return pvRun(w.team, p.ops, { members:w.members, actor:w.me, teacher:false, now:new Date().toISOString() });
+        version:v, history:pvHistList(w.team), safe:!!pv.safe[w.email], sender:'your-teacher@lbschools.net', course:COURSE.id, rotate:pvRotate() };
+    case 'poll':    return v === Number(p.version) ? { ok:true, same:true, rotate:pvRotate() } : { ok:true, board:pvBoard(w.team), version:v, rotate:pvRotate() };
+    case 'ops':     return pvRun(w.team, p.ops, { members:w.members, actor:w.me, teacher:false, now:new Date().toISOString(), course:COURSE.id, rotate:pvRotate() });
     case 'commit':  return { ok:true, sent:true };
     case 'safe':    pv.safe[w.email] = new Date().toISOString(); return { ok:true };
     case 'history': return { ok:true, snapshot:pvSnap(w.team, p.sprintNo) };
@@ -1391,16 +1428,22 @@ function previewTeacher(action, p){
       const teams = [...new Set(pv.people.map(x => x.team).filter(Boolean))].sort();
       const earlier = (t, key) => (pv.history[t] || []).reduce((n, s) => n + (CSI.codeByOwner(s)[key] || 0), 0);
       const issues = [];
-      pv.people.forEach((x, i) => { if (!x.role) issues.push({ row:i + 2, who:`${x.first} ${x.last}`, team:x.team, issue:'Role pending. Add a role.' }); });
-      teams.forEach(t => { if (!pv.people.some(x => x.team === t && CSI.hasRole(x, 'PM'))) issues.push({ row:'', who:'', team:t, issue:'No PM yet.' }); });
+      pv.people.forEach((x, i) => { if (!pvRotate() && !x.role) issues.push({ row:i + 2, who:`${x.first} ${x.last}`, team:x.team, issue:'Role pending. Add a role.' }); });
+      teams.forEach(t => { const n = pv.people.filter(x => x.team === t).length; if (COURSE.maxGroup && n > COURSE.maxGroup) issues.push({ row:'', who:'', team:t, issue:`${n} students in one group. The limit is ${COURSE.maxGroup}.` }); });
+      if (!pvRotate()) teams.forEach(t => { if (!pv.people.some(x => x.team === t && CSI.hasRole(x, 'PM'))) issues.push({ row:'', who:'', team:t, issue:'No PM yet.' }); });
       return { ok:true,
-        teams: teams.map(t => CSI.teamSummary(t, pvMembers(t), pvBoard(t), !!pv.boards[t], (pv.history[t] || []).length, pv.updated[t])),
-        students: pv.people.map(x => Object.assign(CSI.studentRow(x, pvBoard(x.team), earlier(x.team, x.key), { safe:pv.safe[x.email], lastSeen:pv.seen[x.email] }),
+        teams: teams.map(t => CSI.teamSummary(t, pvView(t), pvBoard(t), !!pv.boards[t], (pv.history[t] || []).length, pv.updated[t])),
+        students: pv.people.map(x => Object.assign(CSI.studentRow(Object.assign({}, x, pvRotate() ? { role:(CSI.memberOf(pvView(x.team), x.key) || x).role, intern:false } : {}),
+          pvBoard(x.team), earlier(x.team, x.key), { safe:pv.safe[x.email], lastSeen:pv.seen[x.email] }),
           { help: CSI.helpTally(pvHelp[x.team] || [], x.key, pvBoard(x.team).sprintNo) })),
-        issues, roles:CSI.ROLES, quota:1500, sender:'your-teacher@lbschools.net',
+        issues, roles:CSI.ROLES, course:COURSE.id, rotate:pvRotate(), quota:1500, sender:'your-teacher@lbschools.net',
         demo: pv.boards[DEMO_TEAM] ? CSI.teamSummary(DEMO_TEAM, pvMembers(DEMO_TEAM), pvBoard(DEMO_TEAM), true, (pv.history[DEMO_TEAM] || []).length, pv.updated[DEMO_TEAM]) : null,
         demoEmail:PREVIEW_DEMO, demoOpen:pv.demoOpen };
     }
+    case 'teacherSetRoleMode':
+      if (!COURSE.rotating) throw serverError('This course uses roster roles only.');
+      pvRoleMode = p.mode === 'roster' ? 'roster' : 'rotating';
+      return { ok:true, rotate:pvRotate() };
     case 'teacherHelp': {
       const x = pv.people.find(q => q.email === p.student);
       if (!x) throw serverError("That student isn't on the Roster tab anymore.");
@@ -1408,9 +1451,9 @@ function previewTeacher(action, p){
     }
     case 'teacherBoard':
       if (!pvMembers(team).length) throw serverError('Nobody on the roster is on that team.');
-      return { ok:true, team, members:pvMembers(team).map(pub), board:pvBoard(team), version:pv.versions[team] || 0, history:pvHistList(team) };
+      return { ok:true, team, members:pvMembers(team).map(pub), board:pvBoard(team), version:pv.versions[team] || 0, history:pvHistList(team), course:COURSE.id, rotate:pvRotate() };
     case 'teacherOps':
-      return pvRun(team, p.ops, { members:pvMembers(team), actor:null, teacher:true, now:new Date().toISOString() });
+      return pvRun(team, p.ops, { members:pvMembers(team), actor:null, teacher:true, now:new Date().toISOString(), course:COURSE.id, rotate:pvRotate() });
     case 'teacherSetRole': {
       const x = pv.people.find(q => q.email === p.student);
       if (!x) throw serverError("That student isn't on the Roster tab anymore.");
@@ -1426,8 +1469,8 @@ function previewTeacher(action, p){
       return { ok:true };
     }
     case 'teacherEmailLeads': {
-      const leads = pvMembers(team).filter(CSI.isLead);
-      if (!leads.length) throw serverError(`${team} has no PM or Asst PM on the roster yet.`);
+      const leads = pvView(team).filter(CSI.isLead);
+      if (!leads.length) throw serverError(`${team} has no PM, Asst PM, or Lead yet.`);
       if (!String(p.subject || '').trim() || !String(p.message || '').trim()) throw serverError('Add a subject and a message.');
       return { ok:true, sentTo:leads.map(m => `${m.first} ${m.last}`) };
     }
@@ -1445,7 +1488,7 @@ function previewTeacher(action, p){
    The server applies the same change to the team's latest board, so two people working at once
    don't overwrite each other. If a teammate's change makes yours impossible (they deleted the card
    you moved), yours is skipped and you see why. */
-const ctxLocal = () => ({ members:state.members, actor:state.me, teacher:false, now:new Date().toISOString() });
+const ctxLocal = () => ({ members:state.roster || state.members, actor:state.me, teacher:false, now:new Date().toISOString(), course:COURSE.id, rotate:!!state.rotate });
 
 function setSync(text, bad){ const s = $('#sync'); s.textContent = text; s.classList.toggle('bad', !!bad); }
 const pending = () => state.queue.length > 0 || !!state.inflight;
@@ -1528,6 +1571,7 @@ async function refreshBoard(force){
   if (!force && (pending() || document.hidden || state.editing || state.goalEditing || state.finishOpen || boardFieldFocused())) return;
   try{
     const j = await api('poll', { version: force ? -1 : state.version });
+    if (j.rotate != null && !!j.rotate !== !!state.rotate){ state.rotate = !!j.rotate; renderBoard(); }
     if (j.same || (!force && pending())) return;
     const mine = CSI.nameOf(state.me);
     adoptServer(j.board, j.version);
@@ -1610,12 +1654,25 @@ async function openStudent(user){
   let j;
   try{ j = await api('signin'); }
   catch(e){ state.user = null; throw e; }
-  Object.assign(state, { team:j.team, me:j.me, members:j.members || [], demo:!!j.demo,
+  Object.assign(state, { team:j.team, me:j.me, members:j.members || [], roster:j.members || [], rotate:!!j.rotate, demo:!!j.demo,
     history:j.history || [], sender:j.sender || '', safe:!!j.safe, readonly:false });
   state.base = CSI.sanitize(j.board); state.board = CSI.clone(state.base); state.version = j.version || 0;
   if (!j.demo && !state.teacher){ try{ localStorage.setItem(LS_KEY, JSON.stringify(user)); }catch(_){} }
   // The demo account always shows this screen so you can walk the class through it.
   if (!state.safe || state.demo) openSafe(); else openBoard();
+}
+
+/* ---------------- Course ---------------- */
+const COURSE = CSI.courseOf(COURSE_ID);
+document.documentElement.setAttribute('data-course', COURSE.id);
+document.title = `${COURSE.name} Sprint Board`;
+$('#courseName').textContent = COURSE.name;
+if (!COURSE.criteria) $('#critPanel').hidden = true;
+// state.roster keeps roster roles; in rotating mode the board shows the roles for its current sprint.
+function applyRoles(){
+  if (!state.roster || !state.board) return;
+  state.members = state.rotate ? CSI.rotate(state.roster, B().sprintNo) : state.roster;
+  if (state.me) state.me = CSI.memberOf(state.members, state.me.key) || state.me;
 }
 
 /* ---------------- Safe senders ---------------- */
@@ -1718,6 +1775,14 @@ $('#demoAllow').addEventListener('change', async e => {
     toast(on ? 'Demo sign-in is on. Uncheck it when you are done.' : 'Demo sign-in is off. Open demo board still works here.');
   }catch(err){ e.target.checked = !on; toast(err.message); }
 });
+$('#roleMode').addEventListener('change', async e => {
+  const mode = e.target.value;
+  try{
+    await tapi('teacherSetRoleMode', { mode });
+    await loadClass(); renderTeacher();
+    toast(mode === 'rotating' ? 'Rotating roles are on. Each group gets Lead, Coder, and Tester, shifting every sprint.' : 'Roster roles are on. Set each student\'s role in the Students tab.');
+  }catch(err){ toast(err.message); e.target.value = mode === 'rotating' ? 'roster' : 'rotating'; }
+});
 ['#tabTeams', '#tabStudents'].forEach(id => $(id).addEventListener('click', () => {
   const T = state.teacher; T.tab = id === '#tabTeams' ? 'teams' : 'students'; T.filter.chip = ''; renderTeacher();
 }));
@@ -1747,6 +1812,8 @@ function renderTeacher(){
     : `Demo board (${D.demoEmail}): empty and ready for a walkthrough.`;
   $('#demoResetBtn').disabled = !d;
   $('#demoAllow').checked = !!D.demoOpen;
+  $('#roleModeRow').hidden = !COURSE.rotating;
+  $('#roleMode').value = D.rotate ? 'rotating' : 'roster';
 
   const issues = D.issues || [];
   $('#issues').hidden = !issues.length;
@@ -1759,7 +1826,7 @@ function renderTeacher(){
 
   const rows = T.tab === 'teams' ? D.teams : D.students;
   const chips = T.tab === 'teams'
-    ? [['All', ''], ['Criteria waiting', 'crit', D.teams.filter(critWaiting).length],
+    ? [['All', ''], ...(COURSE.criteria ? [['Criteria waiting', 'crit', D.teams.filter(critWaiting).length]] : []),
        [`Quiet ${QUIET_DAYS}+ days`, 'quiet', D.teams.filter(quietDays).length],
        ['Not opened', 'unopened', D.teams.filter(r => r.status === 'Not opened').length]]
     : [['All', ''], ['Role pending', 'role', D.students.filter(r => !r.role).length],
@@ -1780,7 +1847,7 @@ function renderTeacher(){
 const TEAM_COLS = [
   { key:'team', label:'Team', val:r => r.team, cell:r => [el('strong', { text:r.team }),
       el('span', { class:'sub', text:`${plural(r.size, 'student')}${r.interns ? `, ${plural(r.interns, 'intern')}` : ''}` })] },
-  { key:'pm', label:'PM / Asst PM', val:r => r.pm, cell:r => [r.pm ? el('span', { text:r.pm }) : el('span', { class:'pending', text:'No PM' }),
+  { key:'pm', label: COURSE.rotating ? 'Lead / PM' : 'PM / Asst PM', val:r => r.pm, cell:r => [r.pm ? el('span', { text:r.pm }) : el('span', { class:'pending', text:'No PM' }),
       el('span', { class:'sub', text: r.asst ? `Asst: ${r.asst}` : 'No Asst PM' })] },
   { key:'sprint', label:'Sprint', val:r => r.sprintNo, cell:r => [el('span', { text:r.sprint }), el('span', { class:'sub', text:`${r.finished} finished` })] },
   { key:'status', label:'Status', val:r => ['In progress', 'Between sprints', 'Not opened'].indexOf(r.status), cell:r => {
@@ -1800,13 +1867,14 @@ const TEAM_COLS = [
   { key:'lastUpdated', label:'Last change', num:true, val:r => r.lastUpdated, cell:r => [fmtShort(r.lastUpdated), r.updatedBy ? el('span', { class:'sub', text:r.updatedBy }) : null] },
   { key:'', label:'', cell:r => el('div', { class:'acts' },
       el('button', { type:'button', class:'ghost small', text:'View board', 'aria-label':`View ${r.team}'s board`, onclick:() => viewTeam(r.team) }),
-      el('button', { type:'button', class:'ghost small', text:'Email PM + Asst', 'aria-label':`Email ${r.team}'s PM and Asst PM`, onclick:() => openEmailLeads(r) })) }
+      el('button', { type:'button', class:'ghost small', text: state.teacher.data.rotate ? 'Email Lead' : 'Email PM + Asst', 'aria-label':`Email ${r.team}'s ${state.teacher.data.rotate ? 'Lead' : 'PM and Asst PM'}`, onclick:() => openEmailLeads(r) })) }
 ];
 
 const STUDENT_COLS = [
   { key:'name', label:'Student', val:r => `${r.last} ${r.first}`.toLowerCase(), cell:r => [el('strong', { text:`${r.first} ${r.last}` }), el('span', { class:'sub', text:r.email })] },
   { key:'team', label:'Team', val:r => r.team, cell:r => r.team || el('span', { class:'pending', text:'No team' }) },
   { key:'role', label:'Role', val:r => r.role || '~', cell:r => {
+      if (state.teacher.data.rotate) return el('span', { text: r.role ? `${r.role} this sprint` : '—' });
       const roles = state.teacher.data.roles || CSI.ROLES;
       const have = CSI.rolesOf(r);
       const save = () => setRole(r, CSI.joinRoles([main.value, also.value].filter(Boolean)), null);
@@ -1844,7 +1912,8 @@ function cmp(a, b){
 function renderTable(){
   const T = state.teacher, D = T.data, f = T.filter;
   const isTeams = T.tab === 'teams';
-  const cols = isTeams ? TEAM_COLS : STUDENT_COLS;
+  const cols = (isTeams ? TEAM_COLS : STUDENT_COLS).filter(c =>
+    !(c.key === 'crit' && !COURSE.criteria) && !(c.key === 'intern' && !COURSE.interns));
   const sort = T.sort[T.tab];
   $('#tHead').replaceChildren(...cols.map(c => {
     if (!c.key) return el('th', { scope:'col' }, el('span', { class:'sr', text:'Actions' }));
@@ -1928,7 +1997,7 @@ async function viewTeam(team){
   try{
     const j = await tapi('teacherBoard', { team });
     clearBoardState();
-    Object.assign(state, { readonly:true, team:j.team, members:j.members || [], me:null, history:j.history || [], version:j.version || 0 });
+    Object.assign(state, { readonly:true, team:j.team, members:j.members || [], roster:j.members || [], rotate:!!j.rotate, me:null, history:j.history || [], version:j.version || 0 });
     state.board = CSI.sanitize(j.board);
     const b = state.board.criteria;
     state.critOpen = b.status === 'submitted' || !!b.change || b.items.some(i => i.state === 'claimed');
@@ -1969,7 +2038,7 @@ function openEmailLeads(r){
     }catch(e){ err.textContent = e.message; send.disabled = false; }
   } });
   openSheet(`Email ${r.team}'s leads`,
-    el('p', { text: to ? `To: ${to}` : `${r.team} has no PM or Asst PM on the roster yet.` }),
+    el('p', { text: to ? `To: ${to}` : `${r.team} has no PM, Asst PM, or Lead yet.` }),
     el('label', { for:'mailSubj', text:'Subject' }), subj,
     el('label', { for:'mailMsg', text:'Message' }), msg,
     el('label', { class:'check', for:'mailCopy' }, copy, 'Send me a copy'),
@@ -1986,6 +2055,7 @@ const colorOf = key => { const m = memberOf(key); return m ? m.color : 'var(--un
 const initials = key => { const m = memberOf(key); return m ? (m.first[0] || '') + (m.last[0] || '') : '?'; };
 const roleText = m => (m.role || 'Role pending') + (m.intern ? ', intern' : '');
 const isLeadMe = () => !state.readonly && CSI.isLead(state.me);
+const leadWord = () => (state.rotate ? 'Lead' : 'PM');
 const canEditGoal = g => !state.readonly && (g.owner === state.me.key || isLeadMe());
 const acOf = id => B().criteria.items.find(i => i.id === id);
 function tilt(id){ let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return ((h % 17) - 8) / 10; }
@@ -2007,6 +2077,7 @@ function openBoard(){
 
 function renderBoard(){
   if ($('#board').hidden && !state.team) return;
+  applyRoles();
   renderHeader(); renderCrit(); renderSprint(); renderMembers(); renderGoals(); renderPrev(); renderRetro();
   renderCardForm(); renderColumns(); renderOutcomes(); renderFinish(); renderBlockers(); renderCongrats();
   renderCake(); renderAssets(); renderHistory();
@@ -2192,8 +2263,8 @@ function renderGoals(){
   acOptions($('#goalAc'), $('#goalAc').value);
   $('#goalHint').hidden = false;
   $('#goalHint').textContent = !open ? 'Everyone has reached their goal limit for this sprint.'
-    : 'Up to 3 goals each (interns: 1). Each goal adds a starter card to Pick Me.' +
-      (b.criteria.items.length ? ' Several goals can link to the same criterion, one piece each.' : ' Once your PM adds acceptance criteria, every goal links to one.');
+    : `Up to 3 goals each${COURSE.interns ? ' (interns: 1)' : ''}. Each goal adds a starter card to Pick Me.` +
+      (!COURSE.criteria ? '' : b.criteria.items.length ? ' Several goals can link to the same criterion, one piece each.' : ' Once your PM adds acceptance criteria, every goal links to one.');
 }
 
 function goalEditor(g){
@@ -2299,13 +2370,17 @@ function moveCardTo(id, col){ act({ type:'moveCard', id, col }); }
         el('select', { id:'cardGoal', 'aria-label':'Sprint Goal for this card' }),
         el('select', { id:'cardOwner', 'aria-label':'Who owns this card' }),
         el('label', { class:'check', for:'cardCode' }, el('input', { id:'cardCode', type:'checkbox' }), 'Code: someone writes code for this'),
+        COURSE.sizes ? el('select', { id:'cardSize', 'aria-label':'How big is this card?' },
+          el('option', { value:'', text:'Size: not sure yet' }), el('option', { value:'S', text:'Size: S (one class period)' }),
+          el('option', { value:'M', text:'Size: M (two or three periods)' }), el('option', { value:'L', text:'Size: L (most of a week)' })) : null,
         el('button', { type:'submit', id:'cardBtn', text:'Add card' }));
       form.addEventListener('submit', e => {
         e.preventDefault();
         const text = $('#cardIn').value.trim();
         if (!text){ $('#cardIn').focus(); return; }
-        if (act({ type:'addCard', card:{ id:uid(), text, goalId:$('#cardGoal').value, owner:$('#cardOwner').value, code:$('#cardCode').checked } })){
-          $('#cardIn').value = ''; $('#cardCode').checked = false; $('#cardIn').focus();
+        if (act({ type:'addCard', card:{ id:uid(), text, goalId:$('#cardGoal').value, owner:$('#cardOwner').value, code:$('#cardCode').checked,
+            size: $('#cardSize') ? $('#cardSize').value : '' } })){
+          $('#cardIn').value = ''; $('#cardCode').checked = false; if ($('#cardSize')) $('#cardSize').value = ''; $('#cardIn').focus();
         }
       });
       colEl.append(form);
@@ -2318,7 +2393,7 @@ function renderCardForm(){
   if (state.readonly) return;
   const sel = $('#cardGoal'), prev = sel.value, goals = B().goals;
   const off = !goals.length;
-  ['#cardIn', '#cardGoal', '#cardOwner', '#cardCode', '#cardBtn'].forEach(s => { $(s).disabled = off; });
+  ['#cardIn', '#cardGoal', '#cardOwner', '#cardCode', '#cardSize', '#cardBtn'].forEach(s => { if ($(s)) $(s).disabled = off; });
   if (off){ sel.replaceChildren(el('option', { value:'', text:'Add a Sprint Goal first' })); return; }
   sel.replaceChildren(...goals.map(g => el('option', { value:g.id, text:'Goal: ' + g.text })));
   sel.value = goals.some(g => g.id === prev) ? prev : goals[0].id;
@@ -2358,9 +2433,10 @@ function cardEl(c, ci){
   const meta = el('div', { class:'note-meta' },
     el('span', { class:'tag', title:nameOf(c.owner), text:initials(c.owner) }));
   if (c.code) meta.append(el('span', { class:'tag code', title:'Someone writes code for this card', text:'Code' }));
+  if (COURSE.sizes && c.size) meta.append(el('span', { class:'tag', title:'Card size', text:c.size }));
   if (!c.goalId) meta.append(el('span', { class:'tag', text:'No goal' }));
   if (c.review) meta.append(el('span', { class:'tag ok', title:`Reviewed ${fmtShort(c.review.at)}`,
-    text: c.review.override ? `PM approved (${c.review.name.split(' ')[0]})` : `Reviewed by ${c.review.name.split(' ')[0]}` }));
+    text: c.review.override ? (state.members.length === 1 ? 'Self-checked' : `${leadWord()} approved (${c.review.name.split(' ')[0]})`) : `Reviewed by ${c.review.name.split(' ')[0]}` }));
   else if (c.col === 'review') meta.append(el('span', { class:'tag need', text:'Needs review' }));
   if ((c.helpers || []).length) meta.append(el('span', { class:'tag help', title:`Helped by ${c.helpers.map(nameOf).join(', ')}`,
     text:`Helped by ${c.helpers.map(k => nameOf(k).split(' ')[0]).join(', ')}` }));
@@ -2384,12 +2460,14 @@ function reviewBox(c){
     else box.append(el('span', { text:'Reviewed. Move it to Deploy.' }));
   } else if (me.intern){
     box.append(el('span', { text:'A full team member reviews this.' }));
+  } else if (state.members.length === 1){
+    box.append(el('button', { type:'button', text:'Mark checked', onclick:() => act({ type:'review', id:c.id, on:true }) }));
   } else if (me.key !== c.owner){
     box.append(el('button', { type:'button', text:'Mark reviewed', onclick:() => act({ type:'review', id:c.id, on:true }) }));
   } else if (CSI.isLead(me)){
     box.append(el('span', { text:'Your card: ask a teammate, or' }),
-      el('button', { type:'button', class:'ghost', text:'Approve as PM', onclick:() => {
-        if (confirm('Approve your own card without a teammate review? Your teacher sees it marked "PM approved."')) act({ type:'review', id:c.id, on:true, override:true });
+      el('button', { type:'button', class:'ghost', text:`Approve as ${leadWord()}`, onclick:() => {
+        if (confirm(`Approve your own card without a teammate review? Your teacher sees it marked "${leadWord()} approved."`)) act({ type:'review', id:c.id, on:true, override:true });
       } }));
   } else {
     box.append(el('span', { text:'Your card: a teammate reviews it.' }));
@@ -2414,6 +2492,9 @@ function editPanel(c){
     el('label', { for:id('o'), text:'Owner' }), owner,
     el('label', { class:'check', for:id('c') },
       el('input', { id:id('c'), type:'checkbox', checked:c.code, onchange:e => upd({ code:e.target.checked }) }), 'Code: someone writes code for this'),
+    COURSE.sizes ? el('label', { for:id('z'), text:'Size' }) : null,
+    COURSE.sizes ? (() => { const z = el('select', { id:id('z'), onchange:e => upd({ size:e.target.value }) },
+      el('option', { value:'', text:'Not sure yet' }), CSI.SIZES.map(x => el('option', { value:x, text:x }))); z.value = c.size || ''; return z; })() : null,
     el('label', { class:'check', for:id('b') },
       el('input', { id:id('b'), type:'checkbox', checked:c.blocked, onchange:e => act({ type:'block', id:c.id, on:e.target.checked, note:note.value, blockerId:uid() }) }), 'Blocked'),
     noteWrap,
@@ -2471,7 +2552,7 @@ function renderFinish(){
   const b = B(), box = $('#finishBox');
   if (state.readonly){ box.replaceChildren(); return; }
   if (!isLeadMe()){
-    box.replaceChildren(el('p', { class:'hint', text:'Your PM or Asst PM finishes the sprint when the team agrees it is over.' }));
+    box.replaceChildren(el('p', { class:'hint', text: state.rotate ? "This sprint's Lead finishes the sprint when the group agrees it is over." : 'Your PM or Asst PM finishes the sprint when the team agrees it is over.' }));
     return;
   }
   if (!state.finishOpen){
