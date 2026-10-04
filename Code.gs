@@ -43,7 +43,7 @@ const CONFIG = {
 
 const TABS = {
   ROSTER: 'Roster', TEAMS: 'Teams', HISTORY: 'SprintHistory',
-  LOG: 'CommitLog', STUDENTS: 'Students', ISSUES: 'RosterIssues'
+  LOG: 'CommitLog', STUDENTS: 'Students', ISSUES: 'RosterIssues', HELP: 'HelpLog'
 };
 const ROSTER_HEADERS = ['First', 'Last', 'Email', 'Project Team', 'Role', 'Intern'];
 const CHUNKS = 6;            // a board is split across this many cells
@@ -54,6 +54,8 @@ const TEAM_DATA_COL = 8;     // first Board chunk column
 const HISTORY_HEADERS = ['Finished', 'Team', 'Sprint', 'Sprint Name', 'Goals Met', 'Finished By'].concat(chunkHeads_('Snapshot'));
 const HISTORY_DATA_COL = 7;
 const LOG_HEADERS = ['Timestamp', 'Team', 'Sent By', 'Type', 'Recipients', 'Cards Done', 'Cards Total'];
+// Teacher-only. Every Helped by change, including names later removed. Students never receive this tab.
+const HELP_HEADERS = ['Time', 'Team', 'Sprint', 'Card', 'Owner', 'Helper', 'Change', 'Changed By', 'Card ID', 'Owner Key', 'Helper Key', 'By Key'];
 const STUDENT_HEADERS = ['Email', 'First', 'Last', 'Team', 'Safe Sender Confirmed', 'First Seen', 'Last Seen'];
 const ISSUE_HEADERS = ['Roster Row', 'Student', 'Project Team', 'Issue'];
 
@@ -94,7 +96,7 @@ const CSI = (function () {
   const RESULTS = { met: 'Met', partly: 'Partly met', missed: 'Missed' };
   const CRIT_STATUS = ['draft', 'submitted', 'returned', 'approved'];
   const PALETTE = ['#F7D84B', '#6FD0E0', '#F59AC2', '#8FD694', '#F9A95B', '#B9A2F0', '#A8C8F0', '#E8C39E', '#C6E377', '#F2A7A0'];
-  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 12, roles: 2, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
+  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 20, critTarget: 12, roles: 2, helpers: 6, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
   const DEFAULT_CAKE = "Whoever's card stays flagged Blocked the longest at standup brings snacks next sprint.";
 
   const clone = x => JSON.parse(JSON.stringify(x));
@@ -131,7 +133,8 @@ const CSI = (function () {
     const card = c => ({
       id: id(c.id), text: s(c.text, 200), goalId: id(c.goalId), owner: id(c.owner),
       col: COLUMNS.indexOf(c.col) >= 0 ? c.col : 'pick', code: !!c.code,
-      blocked: !!c.blocked, blockNote: s(c.blockNote, 160), review: review(c.review), seed: !!c.seed
+      blocked: !!c.blocked, blockNote: s(c.blockNote, 160), review: review(c.review), seed: !!c.seed,
+      helpers: arr(c.helpers).map(id).filter(Boolean).slice(0, MAX.helpers)
     });
     const goal = g => ({ id: id(g.id), text: s(g.text, 160), owner: id(g.owner), color: hex(g.color), acId: id(g.acId) });
     const crit = x.criteria && typeof x.criteria === 'object' ? x.criteria : {};
@@ -197,7 +200,7 @@ const CSI = (function () {
   }
   function newCard(o) {
     return { id: o.id, text: o.text, goalId: o.goalId || '', owner: o.owner || '', col: o.col || 'pick',
-      code: !!o.code, blocked: false, blockNote: '', review: null, seed: !!o.seed };
+      code: !!o.code, blocked: false, blockNote: '', review: null, seed: !!o.seed, helpers: [] };
   }
   function findCard(b, id) { return b.cards.filter(c => c.id === id)[0] || fail('A teammate deleted that card.'); }
   function needLead(a, what) { if (!isLead(a)) fail('Only the PM or Asst PM can ' + what + '.'); }
@@ -287,7 +290,11 @@ const CSI = (function () {
           if (op.goalId && !b.goals.some(g => g.id === op.goalId)) fail('A teammate removed that goal.');
           c.goalId = op.goalId;
         }
-        if (op.owner != null) { const m = memberOf(ctx.members, op.owner) || fail('Choose a teammate from the list.'); c.owner = m.key; }
+        if (op.owner != null) {
+          const m = memberOf(ctx.members, op.owner) || fail('Choose a teammate from the list.');
+          c.owner = m.key;
+          c.helpers = (c.helpers || []).filter(h => h !== m.key);
+        }
         if (op.code != null) c.code = !!op.code;
         break;
       }
@@ -329,6 +336,23 @@ const CSI = (function () {
           if (c.col !== 'review') fail('Move the card back to Review to undo its review.');
           if (a.key !== c.review.by && !isLead(a)) fail('Only the reviewer or the PM can undo a review.');
           c.review = null;
+        }
+        break;
+      }
+
+      case 'help': {
+        const c = findCard(b, op.id);
+        c.helpers = c.helpers || [];
+        if (op.on) {
+          if (a.key === c.owner) fail('This is your card. A teammate who helped adds their own name.');
+          if (c.helpers.indexOf(a.key) >= 0) return result;
+          if (c.helpers.length >= MAX.helpers) fail('This card already lists ' + MAX.helpers + ' helpers.');
+          c.helpers.push(a.key);
+        } else {
+          const who = op.who || a.key;
+          if (c.helpers.indexOf(who) < 0) return result;
+          if (who !== a.key && a.key !== c.owner) fail("Only the helper or the card's owner can remove a helper.");
+          c.helpers = c.helpers.filter(h => h !== who);
         }
         break;
       }
@@ -455,7 +479,7 @@ const CSI = (function () {
         critEditable(b);
         const t = T(op.text, 240);
         if (!t) fail('Type the criterion first.');
-        if (b.criteria.items.length >= MAX.criteria) fail('12 criteria is the limit.');
+        if (b.criteria.items.length >= MAX.criteria) fail(MAX.criteria + ' criteria is the limit. Combine similar ones, then split them into Sprint Goals.');
         const n = b.criteria.items.reduce((m, i) => Math.max(m, Number(String(i.code).replace(/\D/g, '')) || 0), 0) + 1;
         b.criteria.items.push({ id: op.id, code: 'AC-' + n, text: t, state: 'none', sprints: [] });
         break;
@@ -571,18 +595,53 @@ const CSI = (function () {
   function run(board, ops, ctx) {
     let b = board;
     const rejected = [], finished = [];
-    let applied = 0;
+    let applied = 0, events = [];
     (Array.isArray(ops) ? ops : []).slice(0, MAX.ops).forEach(op => {
       const trial = clone(b);
       try {
         const r = applyOp(trial, op || {}, ctx);
+        events = events.concat(helpEvents(b, trial, ctx.actor ? ctx.actor.key : ''));
         b = trial; applied++;
         if (r && r.snapshot) finished.push(r.snapshot);
       } catch (e) {
         rejected.push({ opId: op && op.opId, error: String((e && e.message) || e) });
       }
     });
-    return { board: b, applied: applied, rejected: rejected, finished: finished };
+    return { board: b, applied: applied, rejected: rejected, finished: finished, events: events };
+  }
+
+  /* ---------- Help history. The board shows who helps now; these events keep everything,
+     including names that were later removed, for the teacher's eyes only. ---------- */
+  function helpEvents(before, after, by) {
+    const out = [], old = {};
+    before.cards.forEach(c => { old[c.id] = c; });
+    const ev = (c, h, change) => out.push({ sprintNo: before.sprintNo, cardId: c.id, card: c.text, owner: c.owner, helper: h, change: change, by: by });
+    after.cards.forEach(c => {
+      const o = old[c.id];
+      if (!o) return;
+      const was = o.helpers || [], now = c.helpers || [];
+      now.forEach(h => { if (was.indexOf(h) < 0) ev(c, h, 'added'); });
+      was.forEach(h => { if (now.indexOf(h) < 0) ev(c, h, c.owner === h ? 'became owner' : 'removed'); });
+      delete old[c.id];
+    });
+    if (before.sprintNo === after.sprintNo) {
+      Object.keys(old).forEach(k => (old[k].helpers || []).forEach(h => ev(old[k], h, 'card deleted')));
+    }
+    return out;
+  }
+
+  // Counts cards, not clicks. Help that was later removed still counts.
+  function helpTally(events, key, sprintNo) {
+    const got = {}, gotNow = {}, gave = {}, gaveNow = {};
+    let ownerRemoved = 0;
+    events.forEach(e => {
+      if (e.change === 'added') {
+        if (e.owner === key) { got[e.cardId] = 1; if (e.sprintNo === sprintNo) gotNow[e.cardId] = 1; }
+        if (e.helper === key) { gave[e.cardId] = 1; if (e.sprintNo === sprintNo) gaveNow[e.cardId] = 1; }
+      } else if (e.change === 'removed' && e.owner === key && e.by === key) ownerRemoved++;
+    });
+    const n = o => Object.keys(o).length;
+    return { gotNow: n(gotNow), gotAll: n(got), gaveNow: n(gaveNow), gaveAll: n(gave), ownerRemoved: ownerRemoved };
   }
 
   /* ---------- Numbers for the screens, emails, and teacher view ---------- */
@@ -691,7 +750,7 @@ const CSI = (function () {
   return {
     COLUMNS, COLUMN_NAMES, ROLES, LEAD_ROLES, ASSET_TYPES, RESULTS, PALETTE, MAX, DEFAULT_CAKE,
     blank, sanitize, applyOp, run, clone, teamStats, memberStats, critState, finishWarnings,
-    isLead, rolesOf, hasRole, joinRoles, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner
+    isLead, rolesOf, hasRole, joinRoles, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner, helpEvents, helpTally
   };
 })();
 /* ===== END SHARED BOARD RULES ===== */
@@ -787,6 +846,7 @@ function ops_(w, ops) {
   if (r.applied) {
     version = cur.version + 1;
     writeBoard_(w.team, r.board, version);
+    logHelp_(w.team, r.events, w.members);
   }
   const out = { ok: true, board: r.board, version: version, rejected: r.rejected };
   if (r.finished.length) {
@@ -838,6 +898,7 @@ function teacher_(email, req) {
     case 'teacherOps': return withLock_(() => teacherOps_(String(req.team || ''), req.ops));
     case 'teacherSetRole': return withLock_(() => setRole_(normEmail_(req.student), req.role, req.intern));
     case 'teacherEmailLeads': return emailLeads_(String(req.team || ''), req.subject, req.message, !!req.copyMe);
+    case 'teacherHelp': return teacherHelp_(normEmail_(req.student));
     case 'teacherHistory': return { ok: true, snapshot: historySnapshot_(String(req.team || ''), req.sprintNo) };
     case 'teacherDemoSignin':
       PropertiesService.getScriptProperties().setProperty(DEMO_PROP, req.on ? 'yes' : 'no');
@@ -852,6 +913,7 @@ function teacherList_() {
   const boards = allBoards_();
   const hist = allHistory_();
   const seen = studentsByEmail_();
+  const help = readHelp_();
 
   const teamNames = {};
   roster.people.forEach(p => { if (p.team) teamNames[p.team] = true; });
@@ -864,7 +926,9 @@ function teacherList_() {
     const rec = boards[p.team];
     let earlier = 0;
     (hist[p.team] || []).forEach(h => { earlier += h.codeDone[p.key] || 0; });
-    return CSI.studentRow(p, rec ? rec.board : CSI.blank(), earlier, seen[p.email]);
+    const row = CSI.studentRow(p, rec ? rec.board : CSI.blank(), earlier, seen[p.email]);
+    row.help = CSI.helpTally(help[p.team] || [], p.key, rec ? rec.board.sprintNo : 1);
+    return row;
   });
 
   const demoRec = boards[DEMO_TEAM];
@@ -902,7 +966,7 @@ function teacherOps_(team, ops) {
   const cur = readBoard_(team);
   const r = CSI.run(cur.board, ops, { members: members, actor: null, teacher: true, now: new Date().toISOString() });
   let version = cur.version;
-  if (r.applied) { version++; writeBoard_(team, r.board, version); }
+  if (r.applied) { version++; writeBoard_(team, r.board, version); logHelp_(team, r.events, members); }
   return { ok: true, board: r.board, version: version, rejected: r.rejected };
 }
 
@@ -1025,6 +1089,7 @@ function boardHtml_(team, b, members, type, sender) {
       if (c.code) tags.push('Code');
       if (c.blocked) tags.push('<span style="color:#B42318">BLOCKED</span>');
       if (c.review) tags.push('reviewed by ' + e(c.review.name));
+      if (c.helpers && c.helpers.length) tags.push('helped by ' + c.helpers.map(k => e(who(k))).join(', '));
       return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 6px;background:' + colorOf(c.owner) + ';border-radius:3px">' +
         e(c.text) + ' <i>(' + e(who(c.owner)) + (tags.length ? ', ' + tags.join(', ') : '') + ')</i></span>';
     }).join('') || '<span style="color:#5B6776">—</span>';
@@ -1081,6 +1146,7 @@ function setupSheets() {
   sheet_(TABS.TEAMS, TEAM_HEADERS).getRange('D:D').setNumberFormat('yyyy-mm-dd');
   sheet_(TABS.HISTORY, HISTORY_HEADERS).getRange('A:A').setNumberFormat('yyyy-mm-dd h:mm');
   sheet_(TABS.LOG, LOG_HEADERS);
+  sheet_(TABS.HELP, HELP_HEADERS).getRange('A:A').setNumberFormat('yyyy-mm-dd h:mm');
   sheet_(TABS.STUDENTS, STUDENT_HEADERS).getRange('E:G').setNumberFormat('yyyy-mm-dd h:mm');
   SpreadsheetApp.getUi().alert(
     'Tabs are ready.\n\nNext: paste your roster into the Roster tab with these headers in row 1:\n' +
@@ -1398,6 +1464,45 @@ function senderEmail_() {
 function keyFor_(email) {
   const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'csi-board:' + email);
   return Utilities.base64EncodeWebSafe(bytes).slice(0, 16);
+}
+
+/* ================================================================
+ *  Help history (teacher only)
+ * ================================================================ */
+
+function logHelp_(team, events, members) {
+  if (!events || !events.length || team === DEMO_TEAM) return;
+  const name = k => { const m = CSI.memberOf(members, k); return m ? m.first + ' ' + m.last : (k ? 'A former teammate' : ''); };
+  const now = new Date();
+  const rows = events.map(e => [now, team, e.sprintNo, e.card, name(e.owner), name(e.helper), e.change,
+    e.by ? (e.by === e.helper ? name(e.by) + ' (helper)' : e.by === e.owner ? name(e.by) + ' (owner)' : name(e.by)) : 'Teacher',
+    e.cardId, e.owner, e.helper, e.by]);
+  const sh = sheet_(TABS.HELP, HELP_HEADERS);
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, HELP_HEADERS.length).setValues(rows);
+}
+
+// Every help event, grouped by team, oldest first.
+function readHelp_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(TABS.HELP);
+  const out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, HELP_HEADERS.length).getValues().forEach(r => {
+    const team = String(r[1]);
+    (out[team] = out[team] || []).push({
+      at: r[0] instanceof Date ? r[0].toISOString() : String(r[0]), team: team, sprintNo: Number(r[2]) || 1,
+      card: String(r[3]), ownerName: String(r[4]), helperName: String(r[5]), change: String(r[6]), byName: String(r[7]),
+      cardId: String(r[8]), owner: String(r[9]), helper: String(r[10]), by: String(r[11])
+    });
+  });
+  return out;
+}
+
+// One student's help history: help they got and help they gave, newest first.
+function teacherHelp_(email) {
+  const p = readRoster_(true).people.filter(x => x.email === email)[0];
+  if (!p) throw new Error("That student isn't on the Roster tab anymore.");
+  const events = (readHelp_()[p.team] || []).filter(e => e.owner === p.key || e.helper === p.key);
+  return { ok: true, key: p.key, events: events.reverse() };
 }
 
 function sheet_(name, headers) {

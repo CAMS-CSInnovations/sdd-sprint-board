@@ -183,6 +183,15 @@ li.empty{ color:var(--muted); font-size:.9rem; font-style:italic; padding:6px 0;
 .tag.code{ background:#1F2A37; color:#fff; border-color:#1F2A37; font-family:ui-monospace, Menlo, Consolas, monospace; }
 .tag.ok{ background:#1E7B45; color:#fff; border-color:#1E7B45; }
 .tag.need{ background:rgba(255,255,255,.9); border-style:dashed; }
+.tag.help{ background:rgba(255,255,255,.9); }
+.help-box{ margin-top:10px; padding-top:8px; border-top:1px dashed rgba(0,0,0,.25); }
+.help-box ul{ list-style:none; margin:4px 0; padding:0; }
+.help-box li{ display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:.88rem; }
+.help-box .hint{ color:inherit; opacity:1; }
+.help-log{ list-style:none; margin:8px 0 0; padding:0; }
+.help-log li{ padding:6px 0; border-top:1px solid var(--rule); font-size:.92rem; }
+.help-log .when{ display:block; color:var(--muted); font-size:.82rem; }
+.help-log .gone{ color:var(--warn); font-weight:700; }
 .blocknote{ margin:4px 0 0; font-size:.8rem; font-weight:700; color:#8A1C12; }
 .review-box{ margin-top:6px; padding-top:6px; border-top:1px dashed rgba(0,0,0,.25); display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:.8rem; }
 .review-box button{ padding:2px 8px; font-size:.78rem; border-color:#1F2A37; background:#1F2A37; color:#fff; }
@@ -539,7 +548,7 @@ const CSI = (function () {
   const RESULTS = { met: 'Met', partly: 'Partly met', missed: 'Missed' };
   const CRIT_STATUS = ['draft', 'submitted', 'returned', 'approved'];
   const PALETTE = ['#F7D84B', '#6FD0E0', '#F59AC2', '#8FD694', '#F9A95B', '#B9A2F0', '#A8C8F0', '#E8C39E', '#C6E377', '#F2A7A0'];
-  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 12, roles: 2, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
+  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 20, critTarget: 12, roles: 2, helpers: 6, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
   const DEFAULT_CAKE = "Whoever's card stays flagged Blocked the longest at standup brings snacks next sprint.";
 
   const clone = x => JSON.parse(JSON.stringify(x));
@@ -576,7 +585,8 @@ const CSI = (function () {
     const card = c => ({
       id: id(c.id), text: s(c.text, 200), goalId: id(c.goalId), owner: id(c.owner),
       col: COLUMNS.indexOf(c.col) >= 0 ? c.col : 'pick', code: !!c.code,
-      blocked: !!c.blocked, blockNote: s(c.blockNote, 160), review: review(c.review), seed: !!c.seed
+      blocked: !!c.blocked, blockNote: s(c.blockNote, 160), review: review(c.review), seed: !!c.seed,
+      helpers: arr(c.helpers).map(id).filter(Boolean).slice(0, MAX.helpers)
     });
     const goal = g => ({ id: id(g.id), text: s(g.text, 160), owner: id(g.owner), color: hex(g.color), acId: id(g.acId) });
     const crit = x.criteria && typeof x.criteria === 'object' ? x.criteria : {};
@@ -642,7 +652,7 @@ const CSI = (function () {
   }
   function newCard(o) {
     return { id: o.id, text: o.text, goalId: o.goalId || '', owner: o.owner || '', col: o.col || 'pick',
-      code: !!o.code, blocked: false, blockNote: '', review: null, seed: !!o.seed };
+      code: !!o.code, blocked: false, blockNote: '', review: null, seed: !!o.seed, helpers: [] };
   }
   function findCard(b, id) { return b.cards.filter(c => c.id === id)[0] || fail('A teammate deleted that card.'); }
   function needLead(a, what) { if (!isLead(a)) fail('Only the PM or Asst PM can ' + what + '.'); }
@@ -732,7 +742,11 @@ const CSI = (function () {
           if (op.goalId && !b.goals.some(g => g.id === op.goalId)) fail('A teammate removed that goal.');
           c.goalId = op.goalId;
         }
-        if (op.owner != null) { const m = memberOf(ctx.members, op.owner) || fail('Choose a teammate from the list.'); c.owner = m.key; }
+        if (op.owner != null) {
+          const m = memberOf(ctx.members, op.owner) || fail('Choose a teammate from the list.');
+          c.owner = m.key;
+          c.helpers = (c.helpers || []).filter(h => h !== m.key);
+        }
         if (op.code != null) c.code = !!op.code;
         break;
       }
@@ -774,6 +788,23 @@ const CSI = (function () {
           if (c.col !== 'review') fail('Move the card back to Review to undo its review.');
           if (a.key !== c.review.by && !isLead(a)) fail('Only the reviewer or the PM can undo a review.');
           c.review = null;
+        }
+        break;
+      }
+
+      case 'help': {
+        const c = findCard(b, op.id);
+        c.helpers = c.helpers || [];
+        if (op.on) {
+          if (a.key === c.owner) fail('This is your card. A teammate who helped adds their own name.');
+          if (c.helpers.indexOf(a.key) >= 0) return result;
+          if (c.helpers.length >= MAX.helpers) fail('This card already lists ' + MAX.helpers + ' helpers.');
+          c.helpers.push(a.key);
+        } else {
+          const who = op.who || a.key;
+          if (c.helpers.indexOf(who) < 0) return result;
+          if (who !== a.key && a.key !== c.owner) fail("Only the helper or the card's owner can remove a helper.");
+          c.helpers = c.helpers.filter(h => h !== who);
         }
         break;
       }
@@ -900,7 +931,7 @@ const CSI = (function () {
         critEditable(b);
         const t = T(op.text, 240);
         if (!t) fail('Type the criterion first.');
-        if (b.criteria.items.length >= MAX.criteria) fail('12 criteria is the limit.');
+        if (b.criteria.items.length >= MAX.criteria) fail(MAX.criteria + ' criteria is the limit. Combine similar ones, then split them into Sprint Goals.');
         const n = b.criteria.items.reduce((m, i) => Math.max(m, Number(String(i.code).replace(/\D/g, '')) || 0), 0) + 1;
         b.criteria.items.push({ id: op.id, code: 'AC-' + n, text: t, state: 'none', sprints: [] });
         break;
@@ -1016,18 +1047,53 @@ const CSI = (function () {
   function run(board, ops, ctx) {
     let b = board;
     const rejected = [], finished = [];
-    let applied = 0;
+    let applied = 0, events = [];
     (Array.isArray(ops) ? ops : []).slice(0, MAX.ops).forEach(op => {
       const trial = clone(b);
       try {
         const r = applyOp(trial, op || {}, ctx);
+        events = events.concat(helpEvents(b, trial, ctx.actor ? ctx.actor.key : ''));
         b = trial; applied++;
         if (r && r.snapshot) finished.push(r.snapshot);
       } catch (e) {
         rejected.push({ opId: op && op.opId, error: String((e && e.message) || e) });
       }
     });
-    return { board: b, applied: applied, rejected: rejected, finished: finished };
+    return { board: b, applied: applied, rejected: rejected, finished: finished, events: events };
+  }
+
+  /* ---------- Help history. The board shows who helps now; these events keep everything,
+     including names that were later removed, for the teacher's eyes only. ---------- */
+  function helpEvents(before, after, by) {
+    const out = [], old = {};
+    before.cards.forEach(c => { old[c.id] = c; });
+    const ev = (c, h, change) => out.push({ sprintNo: before.sprintNo, cardId: c.id, card: c.text, owner: c.owner, helper: h, change: change, by: by });
+    after.cards.forEach(c => {
+      const o = old[c.id];
+      if (!o) return;
+      const was = o.helpers || [], now = c.helpers || [];
+      now.forEach(h => { if (was.indexOf(h) < 0) ev(c, h, 'added'); });
+      was.forEach(h => { if (now.indexOf(h) < 0) ev(c, h, c.owner === h ? 'became owner' : 'removed'); });
+      delete old[c.id];
+    });
+    if (before.sprintNo === after.sprintNo) {
+      Object.keys(old).forEach(k => (old[k].helpers || []).forEach(h => ev(old[k], h, 'card deleted')));
+    }
+    return out;
+  }
+
+  // Counts cards, not clicks. Help that was later removed still counts.
+  function helpTally(events, key, sprintNo) {
+    const got = {}, gotNow = {}, gave = {}, gaveNow = {};
+    let ownerRemoved = 0;
+    events.forEach(e => {
+      if (e.change === 'added') {
+        if (e.owner === key) { got[e.cardId] = 1; if (e.sprintNo === sprintNo) gotNow[e.cardId] = 1; }
+        if (e.helper === key) { gave[e.cardId] = 1; if (e.sprintNo === sprintNo) gaveNow[e.cardId] = 1; }
+      } else if (e.change === 'removed' && e.owner === key && e.by === key) ownerRemoved++;
+    });
+    const n = o => Object.keys(o).length;
+    return { gotNow: n(gotNow), gotAll: n(got), gaveNow: n(gaveNow), gaveAll: n(gave), ownerRemoved: ownerRemoved };
   }
 
   /* ---------- Numbers for the screens, emails, and teacher view ---------- */
@@ -1136,7 +1202,7 @@ const CSI = (function () {
   return {
     COLUMNS, COLUMN_NAMES, ROLES, LEAD_ROLES, ASSET_TYPES, RESULTS, PALETTE, MAX, DEFAULT_CAKE,
     blank, sanitize, applyOp, run, clone, teamStats, memberStats, critState, finishWarnings,
-    isLead, rolesOf, hasRole, joinRoles, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner
+    isLead, rolesOf, hasRole, joinRoles, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner, helpEvents, helpTally
   };
 })();
 /* ===== END SHARED BOARD RULES ===== */
@@ -1279,11 +1345,19 @@ function pvSnap(team, n){
   if (!s) throw serverError('That sprint is not in Sprint History.');
   return CSI.clone(s);
 }
+const pvHelp = {};   // preview copy of the teacher-only HelpLog tab
+function pvLogHelp(team, events){
+  if (team === DEMO_TEAM) return;
+  const nm = k => { const m = CSI.memberOf(pvMembers(team), k); return m ? `${m.first} ${m.last}` : ''; };
+  const at = new Date().toISOString();
+  events.forEach(e => (pvHelp[team] ||= []).push({ ...e, at, team, ownerName:nm(e.owner), helperName:nm(e.helper),
+    byName: e.by ? nm(e.by) + (e.by === e.helper ? ' (helper)' : e.by === e.owner ? ' (owner)' : '') : 'Teacher' }));
+}
 function pvRun(team, ops, ctx){
   const v = pv.versions[team] || 0;
   const r = CSI.run(pvBoard(team), ops, ctx);
   let nv = v;
-  if (r.applied){ nv = v + 1; pv.boards[team] = r.board; pv.versions[team] = nv; pv.updated[team] = new Date().toISOString(); }
+  if (r.applied){ nv = v + 1; pv.boards[team] = r.board; pv.versions[team] = nv; pv.updated[team] = new Date().toISOString(); pvLogHelp(team, r.events); }
   const out = { ok:true, board:CSI.clone(r.board), version:nv, rejected:r.rejected };
   if (r.finished.length){
     (pv.history[team] ||= []).push(...r.finished);
@@ -1321,10 +1395,16 @@ function previewTeacher(action, p){
       teams.forEach(t => { if (!pv.people.some(x => x.team === t && CSI.hasRole(x, 'PM'))) issues.push({ row:'', who:'', team:t, issue:'No PM yet.' }); });
       return { ok:true,
         teams: teams.map(t => CSI.teamSummary(t, pvMembers(t), pvBoard(t), !!pv.boards[t], (pv.history[t] || []).length, pv.updated[t])),
-        students: pv.people.map(x => CSI.studentRow(x, pvBoard(x.team), earlier(x.team, x.key), { safe:pv.safe[x.email], lastSeen:pv.seen[x.email] })),
+        students: pv.people.map(x => Object.assign(CSI.studentRow(x, pvBoard(x.team), earlier(x.team, x.key), { safe:pv.safe[x.email], lastSeen:pv.seen[x.email] }),
+          { help: CSI.helpTally(pvHelp[x.team] || [], x.key, pvBoard(x.team).sprintNo) })),
         issues, roles:CSI.ROLES, quota:1500, sender:'your-teacher@lbschools.net',
         demo: pv.boards[DEMO_TEAM] ? CSI.teamSummary(DEMO_TEAM, pvMembers(DEMO_TEAM), pvBoard(DEMO_TEAM), true, (pv.history[DEMO_TEAM] || []).length, pv.updated[DEMO_TEAM]) : null,
         demoEmail:PREVIEW_DEMO, demoOpen:pv.demoOpen };
+    }
+    case 'teacherHelp': {
+      const x = pv.people.find(q => q.email === p.student);
+      if (!x) throw serverError("That student isn't on the Roster tab anymore.");
+      return { ok:true, key:x.key, events:(pvHelp[x.team] || []).filter(e => e.owner === x.key || e.helper === x.key).slice().reverse() };
     }
     case 'teacherBoard':
       if (!pvMembers(team).length) throw serverError('Nobody on the roster is on that team.');
@@ -1713,7 +1793,8 @@ const TEAM_COLS = [
   { key:'crit', label:'Criteria', val:r => (critWaiting(r) ? 0 : 1), cell:r => {
       const [t, c] = critBadge(r.crit);
       return [el('span', { class:'badge ' + c, text:t }),
-        el('span', { class:'sub', text: r.crit.total ? `${r.crit.met} met, ${r.crit.claimed} claimed, of ${r.crit.total}` : 'None entered' })];
+        el('span', { class:'sub', text: r.crit.total ? `${r.crit.met} met, ${r.crit.claimed} claimed, of ${r.crit.total}` : 'None entered' }),
+        r.crit.total > CSI.MAX.critTarget ? el('span', { class:'sub pending', text:`Above target of ${CSI.MAX.critTarget}` }) : null];
     } },
   { key:'retro', label:'Retro', num:true, val:r => r.retroTotal ? r.retroDone / r.retroTotal : null, cell:r => r.retroTotal ? `${r.retroDone} of ${r.retroTotal}` : '—' },
   { key:'lastUpdated', label:'Last change', num:true, val:r => r.lastUpdated, cell:r => [fmtShort(r.lastUpdated), r.updatedBy ? el('span', { class:'sub', text:r.updatedBy }) : null] },
@@ -1747,6 +1828,8 @@ const STUDENT_COLS = [
   { key:'done', label:'Cards done', num:true, val:r => r.owned ? r.done / r.owned : null, cell:r => r.owned ? `${r.done} of ${r.owned}` : '—' },
   { key:'code', label:'Code', num:true, val:r => r.codeAll, cell:r => [`${r.codeDone} this sprint`, el('span', { class:'sub', text:`${r.codeAll} all sprints` })] },
   { key:'reviews', label:'Reviews given', num:true, val:r => r.reviews, cell:r => String(r.reviews) },
+  { key:'gotHelp', label:'Got help', num:true, val:r => (r.help ? r.help.gotNow : 0), cell:r => helpCell(r, 'got') },
+  { key:'gaveHelp', label:'Gave help', num:true, val:r => (r.help ? r.help.gaveNow : 0), cell:r => helpCell(r, 'gave') },
   { key:'shipped', label:'Finished a card', val:r => (r.shipped ? 0 : 1), cell:r => r.intern ? el('span', { class:'sub', text:'Intern' }) : r.shipped ? '✓' : el('span', { class:'pending', text:'Not yet' }) },
   { key:'lastSeen', label:'Last seen', num:true, val:r => r.lastSeen, cell:r => fmtShort(r.lastSeen) }
 ];
@@ -1796,6 +1879,41 @@ function renderTable(){
   }
   if (!rows.length){ body.replaceChildren(el('tr', {}, el('td', { colspan:span, text:'Nothing matches these filters.' }))); return; }
   body.replaceChildren(...rows.map(r => el('tr', {}, cols.map(c => el('td', { class: c.num ? 'num' : '' }, c.cell(r))))));
+}
+
+function helpCell(r, which){
+  const h = r.help || { gotNow:0, gotAll:0, gaveNow:0, gaveAll:0, ownerRemoved:0 };
+  const now = which === 'got' ? h.gotNow : h.gaveNow, all = which === 'got' ? h.gotAll : h.gaveAll;
+  if (!all) return '—';
+  const parts = [el('button', { type:'button', class:'link', 'aria-label':`Help history for ${r.first} ${r.last}`,
+      text: which === 'got' ? `${now} of ${r.owned} cards` : `${now} card${now === 1 ? '' : 's'}`, onclick:() => openHelp(r) }),
+    el('span', { class:'sub', text:`${all} in all sprints` })];
+  if (which === 'got' && h.ownerRemoved) parts.push(el('span', { class:'sub pending', text:`Removed a helper ${h.ownerRemoved}×` }));
+  return parts;
+}
+
+const HELP_WORDS = { 'added':'added', 'removed':'removed', 'card deleted':'card deleted', 'became owner':'became the owner' };
+async function openHelp(r){
+  try{
+    const j = await tapi('teacherHelp', { student:r.email });
+    const line = e => {
+      const got = e.owner === j.key;
+      const what = got ? `${e.helperName || 'A teammate'} helped on "${e.card}"` : `Helped ${e.ownerName || 'a teammate'} on "${e.card}"`;
+      const gone = e.change !== 'added';
+      return el('li', {},
+        el('span', { text:what + (gone ? '. ' : '') }),
+        gone ? el('span', { class:'gone', text:`Name ${HELP_WORDS[e.change] || e.change} by ${e.byName}` }) : null,
+        el('span', { class:'when', text:`Sprint ${e.sprintNo}, ${fmtShort(e.at)}${gone ? '' : `, added by ${e.byName}`}` }));
+    };
+    const bySprint = {};
+    j.events.forEach(e => { if (e.change === 'added' && e.owner === j.key) (bySprint[e.sprintNo] ||= new Set()).add(e.cardId); });
+    const trend = Object.keys(bySprint).sort((a, b) => a - b)
+      .map(n => `Sprint ${n}, ${bySprint[n].size} card${bySprint[n].size === 1 ? '' : 's'}`).join('; ');
+    openSheet(`Help history: ${r.first} ${r.last}`,
+      el('p', { class:'hint', text: trend ? `${r.first} got help on: ${trend}.` : `${r.first} hasn't gotten help on a card yet.` }),
+      j.events.length ? el('ul', { class:'help-log' }, j.events.map(line)) : el('p', { text:'No help recorded yet.' }),
+      el('p', { class:'hint', text:'Only you see this. Removed names stay here and still count.' }));
+  }catch(e){ toast(e.message); }
 }
 
 async function setRole(r, role, intern){
@@ -1935,6 +2053,11 @@ function renderCrit(){
   if (c.status === 'returned' && c.note) parts.push(el('p', { class:'crit-note', text:`Teacher note: ${c.note}` }));
   if (c.change) parts.push(el('p', { class:'crit-note change', text:`Change requested: ${c.change}` }));
 
+  const over = items.length > CSI.MAX.critTarget;
+  if (over) parts.push(el('p', { class:'crit-note change', text: state.readonly && state.teacher
+    ? `${items.length} criteria, above the target of ${CSI.MAX.critTarget}. Approve as is, or send back with a note to combine similar ones.`
+    : `${items.length} criteria, above the target of ${CSI.MAX.critTarget}. Can any be combined? Your teacher decides whether the extra ones stay.` }));
+
   const list = el('ul', { class:'clean' }, items.map(i => {
     const s = CSI.critState(b, i);
     const linked = b.goals.filter(g => g.acId === i.id).length;
@@ -1963,6 +2086,8 @@ function renderCrit(){
       e.preventDefault();
       if (act({ type:'addCriterion', id:uid(), text:inp.value })){ state.critOpen = true; inp.value = ''; renderCrit(); $('#critDetail input[aria-label="New acceptance criterion"]').focus(); }
     } }, inp, el('button', { type:'submit', text:'Add' })));
+    parts.push(el('p', { class:'hint', text:`Aim for ${CSI.MAX.critTarget} or fewer. Combine similar features into one criterion, then split it into Sprint Goals. ` +
+      'For example, "Users can interact socially" becomes two goals linked to the same criterion: "Users can like a location" and "Users can follow other users."' }));
     parts.push(el('div', { class:'row-actions' },
       el('button', { type:'button', text:'Send to teacher for approval', disabled:!items.length,
         onclick:() => { if (act({ type:'submitCriteria' })) toast('Sent. Your teacher approves or sends them back with a note.'); } }),
@@ -2068,7 +2193,7 @@ function renderGoals(){
   $('#goalHint').hidden = false;
   $('#goalHint').textContent = !open ? 'Everyone has reached their goal limit for this sprint.'
     : 'Up to 3 goals each (interns: 1). Each goal adds a starter card to Pick Me.' +
-      (b.criteria.items.length ? '' : ' Once your PM adds acceptance criteria, every goal links to one.');
+      (b.criteria.items.length ? ' Several goals can link to the same criterion, one piece each.' : ' Once your PM adds acceptance criteria, every goal links to one.');
 }
 
 function goalEditor(g){
@@ -2237,6 +2362,8 @@ function cardEl(c, ci){
   if (c.review) meta.append(el('span', { class:'tag ok', title:`Reviewed ${fmtShort(c.review.at)}`,
     text: c.review.override ? `PM approved (${c.review.name.split(' ')[0]})` : `Reviewed by ${c.review.name.split(' ')[0]}` }));
   else if (c.col === 'review') meta.append(el('span', { class:'tag need', text:'Needs review' }));
+  if ((c.helpers || []).length) meta.append(el('span', { class:'tag help', title:`Helped by ${c.helpers.map(nameOf).join(', ')}`,
+    text:`Helped by ${c.helpers.map(k => nameOf(k).split(' ')[0]).join(', ')}` }));
   li.append(meta);
   if (state.readonly) return li;
 
@@ -2290,11 +2417,27 @@ function editPanel(c){
     el('label', { class:'check', for:id('b') },
       el('input', { id:id('b'), type:'checkbox', checked:c.blocked, onchange:e => act({ type:'block', id:c.id, on:e.target.checked, note:note.value, blockerId:uid() }) }), 'Blocked'),
     noteWrap,
+    helpBox(c),
     el('button', { class:'del', type:'button', text:'Delete card', onclick:() => {
       if (!confirm(`Delete "${c.text}"?`)) return;
       state.editing = null;
       act({ type:'deleteCard', id:c.id });
     } }));
+}
+
+// Helpers add their own names. The helper or the card's owner can take a name off.
+function helpBox(c){
+  const me = state.me, helpers = c.helpers || [];
+  const mine = me.key === c.owner, listed = helpers.indexOf(me.key) >= 0;
+  const list = el('ul', {}, helpers.map(k => el('li', {},
+    el('span', { text:nameOf(k) }),
+    (k === me.key || mine) ? el('button', { type:'button', class:'icon', 'aria-label':`Remove ${nameOf(k)} as a helper`,
+      text: k === me.key ? 'Remove me' : 'Remove', onclick:() => act({ type:'help', id:c.id, on:false, who:k }) }) : null)));
+  return el('div', { class:'help-box' },
+    el('strong', { text:'Helped by' }),
+    helpers.length ? list : el('p', { class:'hint', text: mine ? 'Nobody yet. Teammates who help add their own names.' : 'Nobody yet.' }),
+    (!mine && !listed) ? el('button', { type:'button', class:'ghost small', text:'I helped on this card', onclick:() => act({ type:'help', id:c.id, on:true }) }) : null,
+    el('p', { class:'hint', text:'Your teacher can see the full help history.' }));
 }
 
 /* ----- Our Outcomes and finishing ----- */
