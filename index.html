@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-course="csi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -10,25 +10,33 @@
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --surface:#E9EDF1; --panel:#FFFFFF; --ink:#1F2A37; --muted:#5B6776; --rule:#C9D1DA;
-  --marker:#2457C5; --marker-ink:#FFFFFF; --danger:#B42318; --ok:#1E7B45; --warn:#9A5B00; --untagged:#D9DEE4;
+  --ink:#1F2A37; --muted:#5B6776; --rule:#C9D1DA; --surface:#E9EDF1; --panel:#FFFFFF; --marker:#2457C5;
+  --marker-ink:#FFFFFF; --danger:#B42318; --ok:#1E7B45; --warn:#9A5B00; --untagged:#D9DEE4;
   --note-ink:#1F2A37; --flag:#C8261B;
   --hand:'Kalam', 'Segoe Print', 'Bradley Hand', cursive;
   --body:'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color-scheme: light;
 }
+/* Course colors. Set data-course on <html>: csp = marker blue, csi = plum, csa = teal.
+   Status colors (ok, warn, danger, flag) stay the same in every course. */
+:root[data-course="csi"]{ --surface:#ECE8F1; --rule:#D3CBDD; --ink:#241E2E; --muted:#625A6E; --marker:#6B2D8F; }
+:root[data-course="csa"]{ --surface:#E5EEED; --rule:#C2D5D3; --ink:#1B2A2A; --muted:#566867; --marker:#0B6A6C; }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --surface:#151A21; --panel:#1E252F; --ink:#E6EAF0; --muted:#9AA6B5; --rule:#334050;
     --marker:#8CB0FF; --marker-ink:#0F1620; --danger:#FF8F80; --ok:#72D69E; --warn:#F2C26B; --untagged:#AEB7C2;
     color-scheme: dark;
   }
+  :root[data-course="csi"]:not([data-theme="light"]){ --surface:#17141D; --panel:#221D2B; --rule:#3D3349; --ink:#ECE6F2; --muted:#A79DB4; --marker:#D3AEF2; }
+  :root[data-course="csa"]:not([data-theme="light"]){ --surface:#111B1B; --panel:#1A2626; --rule:#2D4243; --ink:#E3EEED; --muted:#93AAA8; --marker:#72D3CF; }
 }
 :root[data-theme="dark"]{
   --surface:#151A21; --panel:#1E252F; --ink:#E6EAF0; --muted:#9AA6B5; --rule:#334050;
   --marker:#8CB0FF; --marker-ink:#0F1620; --danger:#FF8F80; --ok:#72D69E; --warn:#F2C26B; --untagged:#AEB7C2;
   color-scheme: dark;
 }
+:root[data-course="csi"][data-theme="dark"]{ --surface:#17141D; --panel:#221D2B; --rule:#3D3349; --ink:#ECE6F2; --muted:#A79DB4; --marker:#D3AEF2; }
+:root[data-course="csa"][data-theme="dark"]{ --surface:#111B1B; --panel:#1A2626; --rule:#2D4243; --ink:#E3EEED; --muted:#93AAA8; --marker:#72D3CF; }
 :root{ box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
 *,*::before,*::after{ box-sizing:inherit; }
 html{ scroll-padding-top:env(safe-area-inset-top,0px); }
@@ -40,7 +48,7 @@ button,input,select,textarea{ font:inherit; color:inherit; }
 
 /* ---------- Header ---------- */
 .top{ display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px 24px;
-  padding:18px clamp(14px,3vw,32px) 14px; border-bottom:2px solid var(--rule); background:var(--panel); }
+  padding:18px clamp(14px,3vw,32px) 14px; border-bottom:2px solid var(--rule); border-top:6px solid var(--marker); background:var(--panel); }
 .brand h1{ margin:0; font:700 clamp(1.7rem,3.2vw,2.3rem)/1 var(--hand); letter-spacing:.2px; }
 .tagline{ margin:4px 0 0; font:700 clamp(1.15rem,2vw,1.4rem)/1.1 var(--hand); color:var(--marker); }
 .who{ margin:6px 0 0; color:var(--muted); font-size:.95rem; }
@@ -267,6 +275,8 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
 .roster tbody tr:hover{ background:var(--surface); }
 .roster td.num{ white-space:nowrap; }
 .roster select{ width:auto; min-width:150px; padding:4px 6px; font-size:.88rem; }
+.role-pick{ display:flex; flex-direction:column; gap:4px; }
+.roster select.also{ font-size:.82rem; color:var(--muted); border-style:dashed; }
 .roster td .check{ margin:0; }
 .roster .acts{ display:flex; gap:6px; flex-wrap:wrap; }
 .sub{ display:block; color:var(--muted); font-size:.8rem; }
@@ -529,14 +539,18 @@ const CSI = (function () {
   const RESULTS = { met: 'Met', partly: 'Partly met', missed: 'Missed' };
   const CRIT_STATUS = ['draft', 'submitted', 'returned', 'approved'];
   const PALETTE = ['#F7D84B', '#6FD0E0', '#F59AC2', '#8FD694', '#F9A95B', '#B9A2F0', '#A8C8F0', '#E8C39E', '#C6E377', '#F2A7A0'];
-  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 12, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
+  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 12, roles: 2, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
   const DEFAULT_CAKE = "Whoever's card stays flagged Blocked the longest at standup brings snacks next sprint.";
 
   const clone = x => JSON.parse(JSON.stringify(x));
   const fail = msg => { throw new Error(msg); };
   const T = (v, n) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, n);
   const short = t => (t.length > 40 ? t.slice(0, 38) + '…' : t);
-  const isLead = m => !!m && LEAD_ROLES.indexOf(m.role) >= 0;
+  // A student can hold up to MAX.roles roles, stored in one cell as "PM + Developer".
+  const rolesOf = m => String((m && m.role) || '').split('+').map(r => r.trim()).filter(r => ROLES.indexOf(r) >= 0);
+  const hasRole = (m, r) => rolesOf(m).indexOf(r) >= 0;
+  const joinRoles = list => ROLES.filter(r => list.indexOf(r) >= 0).join(' + ');
+  const isLead = m => LEAD_ROLES.some(r => hasRole(m, r));
   const capOf = m => (m && m.intern ? MAX.internGoals : MAX.goals);
   const nameOf = m => (m ? (m.first + ' ' + m.last).trim() : 'A former teammate');
 
@@ -1076,7 +1090,7 @@ const CSI = (function () {
   // One row of the teacher's Teams table.
   function teamSummary(team, members, b, opened, finishedCount, updatedIso) {
     const st = teamStats(b);
-    const lead = r => members.filter(m => m.role === r).map(m => m.first + ' ' + m.last).join(', ');
+    const lead = r => members.filter(m => hasRole(m, r)).map(m => m.first + ' ' + m.last).join(', ');
     const items = b.criteria.items;
     const count = s => items.filter(i => critState(b, i) === s).length;
     return {
@@ -1122,7 +1136,7 @@ const CSI = (function () {
   return {
     COLUMNS, COLUMN_NAMES, ROLES, LEAD_ROLES, ASSET_TYPES, RESULTS, PALETTE, MAX, DEFAULT_CAKE,
     blank, sanitize, applyOp, run, clone, teamStats, memberStats, critState, finishWarnings,
-    isLead, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner
+    isLead, rolesOf, hasRole, joinRoles, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner
   };
 })();
 /* ===== END SHARED BOARD RULES ===== */
@@ -1227,7 +1241,7 @@ const pv = {
     { key:'pv-c', email:'100000003@lbschools.net', first:'Casey',   last:'Sample', team:'Preview Team', role:'QA Tester',    intern:false },
     { key:'pv-d', email:'100000004@lbschools.net', first:'Drew',    last:'Sample', team:'Preview Team', role:'UX/UI Designer', intern:true },
     { key:'pv-e', email:'100000005@lbschools.net', first:'Emerson', last:'Sample', team:'Team Nova',    role:'PM',           intern:false },
-    { key:'pv-f', email:'100000006@lbschools.net', first:'Finley',  last:'Sample', team:'Team Nova',    role:'Developer',    intern:false },
+    { key:'pv-f', email:'100000006@lbschools.net', first:'Finley',  last:'Sample', team:'Team Nova',    role:'Developer + QA Tester',    intern:false },
     { key:'pv-g', email:'100000007@lbschools.net', first:'Gray',    last:'Sample', team:'Team Nova',    role:'',             intern:false }
   ],
   boards:{}, versions:{}, updated:{}, history:{}, seen:{}, safe:{}, demoOpen:false
@@ -1248,7 +1262,7 @@ function pvWho(p){
   let person = pv.people.find(x => x.email === p.email);
   if (!person){
     if (!p.first || !p.last) throw serverError('Enter your first and last name.');
-    const hasPM = pv.people.some(x => x.team === 'Preview Team' && x.role === 'PM');
+    const hasPM = pv.people.some(x => x.team === 'Preview Team' && CSI.hasRole(x, 'PM'));
     person = { key:'pv-' + p.email.slice(0, 9), email:p.email, first:p.first, last:p.last, team:'Preview Team', role: hasPM ? 'Developer' : 'PM', intern:false };
     pv.people.push(person);
   }
@@ -1304,7 +1318,7 @@ function previewTeacher(action, p){
       const earlier = (t, key) => (pv.history[t] || []).reduce((n, s) => n + (CSI.codeByOwner(s)[key] || 0), 0);
       const issues = [];
       pv.people.forEach((x, i) => { if (!x.role) issues.push({ row:i + 2, who:`${x.first} ${x.last}`, team:x.team, issue:'Role pending. Add a role.' }); });
-      teams.forEach(t => { if (!pv.people.some(x => x.team === t && x.role === 'PM')) issues.push({ row:'', who:'', team:t, issue:'No PM yet.' }); });
+      teams.forEach(t => { if (!pv.people.some(x => x.team === t && CSI.hasRole(x, 'PM'))) issues.push({ row:'', who:'', team:t, issue:'No PM yet.' }); });
       return { ok:true,
         teams: teams.map(t => CSI.teamSummary(t, pvMembers(t), pvBoard(t), !!pv.boards[t], (pv.history[t] || []).length, pv.updated[t])),
         students: pv.people.map(x => CSI.studentRow(x, pvBoard(x.team), earlier(x.team, x.key), { safe:pv.safe[x.email], lastSeen:pv.seen[x.email] })),
@@ -1320,11 +1334,14 @@ function previewTeacher(action, p){
     case 'teacherSetRole': {
       const x = pv.people.find(q => q.email === p.student);
       if (!x) throw serverError("That student isn't on the Roster tab anymore.");
-      if (p.role === 'PM' || p.role === 'Asst PM'){
-        const other = pv.people.find(q => q !== x && q.team === x.team && q.role === p.role);
-        if (other) throw serverError(`${x.team} already has a ${p.role}: ${other.first} ${other.last}. Change that student first.`);
-      }
-      x.role = p.role || '';
+      const want = CSI.rolesOf({ role:p.role });
+      if (want.length > CSI.MAX.roles) throw serverError(`A student can hold at most ${CSI.MAX.roles} roles.`);
+      if (want.indexOf('PM') >= 0 && want.indexOf('Asst PM') >= 0) throw serverError('PM and Asst PM must be two different students.');
+      want.filter(w => CSI.LEAD_ROLES.indexOf(w) >= 0).forEach(lead => {
+        const other = pv.people.find(q => q !== x && q.team === x.team && CSI.hasRole(q, lead));
+        if (other) throw serverError(`${x.team} already has a ${lead}: ${other.first} ${other.last}. Change that student first.`);
+      });
+      x.role = CSI.joinRoles(want);
       if (p.intern != null) x.intern = !!p.intern;
       return { ok:true };
     }
@@ -1709,10 +1726,19 @@ const STUDENT_COLS = [
   { key:'name', label:'Student', val:r => `${r.last} ${r.first}`.toLowerCase(), cell:r => [el('strong', { text:`${r.first} ${r.last}` }), el('span', { class:'sub', text:r.email })] },
   { key:'team', label:'Team', val:r => r.team, cell:r => r.team || el('span', { class:'pending', text:'No team' }) },
   { key:'role', label:'Role', val:r => r.role || '~', cell:r => {
-      const sel = el('select', { 'aria-label':`Role for ${r.first} ${r.last}`, onchange:e => setRole(r, e.target.value, null) },
-        el('option', { value:'', text:'Role pending' }), (state.teacher.data.roles || CSI.ROLES).map(x => el('option', { value:x, text:x })));
-      sel.value = r.role || '';
-      return sel;
+      const roles = state.teacher.data.roles || CSI.ROLES;
+      const have = CSI.rolesOf(r);
+      const save = () => setRole(r, CSI.joinRoles([main.value, also.value].filter(Boolean)), null);
+      const main = el('select', { 'aria-label':`Role for ${r.first} ${r.last}`, onchange:save },
+        el('option', { value:'', text:'Role pending' }), roles.map(x => el('option', { value:x, text:x })));
+      main.value = have[0] || '';
+      const also = el('select', { class:'also', 'aria-label':`Second role for ${r.first} ${r.last}`, onchange:save },
+        el('option', { value:'', text:'+ second role' }),
+        roles.filter(x => x !== have[0] && !(CSI.LEAD_ROLES.indexOf(x) >= 0 && CSI.LEAD_ROLES.indexOf(have[0]) >= 0))
+          .map(x => el('option', { value:x, text:x })));
+      also.value = have[1] || '';
+      also.hidden = !have[0];
+      return el('div', { class:'role-pick' }, main, also);
     } },
   { key:'intern', label:'Intern', val:r => (r.intern ? 0 : 1), cell:r => el('label', { class:'check' },
       el('input', { type:'checkbox', checked:r.intern, 'aria-label':`${r.first} ${r.last} is an intern`, onchange:e => setRole(r, r.role, e.target.checked) })) },
@@ -2182,7 +2208,7 @@ function renderColumns(){
   $('#mineBtn').hidden = state.readonly;
   $('#mineBtn').setAttribute('aria-pressed', String(mine));
   $('#mineBtn').textContent = mine ? 'Showing only my cards' : 'Show only my cards';
-  const qa = state.members.filter(m => m.role === 'QA Tester').map(m => m.first);
+  const qa = state.members.filter(m => CSI.hasRole(m, 'QA Tester')).map(m => m.first);
   $('#sub-review').textContent = 'A teammate checks it off' + (qa.length ? `. QA: ${qa.join(', ')}` : '');
   COLUMNS.forEach((col, ci) => {
     const list = $(`#list-${col.id}`);

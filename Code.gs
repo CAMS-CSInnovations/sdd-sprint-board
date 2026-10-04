@@ -11,7 +11,9 @@
  *  5. Paste your roster into the Roster tab. Row 1 headers:
  *       First | Last | Email | Project Team | Role | Intern
  *     Role is one of: PM, Asst PM, Developer, UX/UI Designer, Asset Artist,
- *     QA Tester, Marketing & Outreach. Intern is Y for interns, blank otherwise.
+ *     QA Tester, Marketing & Outreach. On small teams a student can hold two roles:
+ *     write them with a plus sign, like "PM + Developer".
+ *     Intern is Y for interns, blank otherwise.
  *     Then run "Check roster" from the menu.
  *  6. Deploy > New deployment > Web app.  Execute as: Me.  Who has access: Anyone.
  *     Copy the /exec URL into API_URL at the top of the script in index.html.
@@ -92,14 +94,18 @@ const CSI = (function () {
   const RESULTS = { met: 'Met', partly: 'Partly met', missed: 'Missed' };
   const CRIT_STATUS = ['draft', 'submitted', 'returned', 'approved'];
   const PALETTE = ['#F7D84B', '#6FD0E0', '#F59AC2', '#8FD694', '#F9A95B', '#B9A2F0', '#A8C8F0', '#E8C39E', '#C6E377', '#F2A7A0'];
-  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 12, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
+  const MAX = { goals: 3, internGoals: 1, sprintGoals: 60, cards: 120, criteria: 12, roles: 2, retro: 30, assets: 60, blockers: 40, congrats: 40, ops: 50 };
   const DEFAULT_CAKE = "Whoever's card stays flagged Blocked the longest at standup brings snacks next sprint.";
 
   const clone = x => JSON.parse(JSON.stringify(x));
   const fail = msg => { throw new Error(msg); };
   const T = (v, n) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, n);
   const short = t => (t.length > 40 ? t.slice(0, 38) + '…' : t);
-  const isLead = m => !!m && LEAD_ROLES.indexOf(m.role) >= 0;
+  // A student can hold up to MAX.roles roles, stored in one cell as "PM + Developer".
+  const rolesOf = m => String((m && m.role) || '').split('+').map(r => r.trim()).filter(r => ROLES.indexOf(r) >= 0);
+  const hasRole = (m, r) => rolesOf(m).indexOf(r) >= 0;
+  const joinRoles = list => ROLES.filter(r => list.indexOf(r) >= 0).join(' + ');
+  const isLead = m => LEAD_ROLES.some(r => hasRole(m, r));
   const capOf = m => (m && m.intern ? MAX.internGoals : MAX.goals);
   const nameOf = m => (m ? (m.first + ' ' + m.last).trim() : 'A former teammate');
 
@@ -639,7 +645,7 @@ const CSI = (function () {
   // One row of the teacher's Teams table.
   function teamSummary(team, members, b, opened, finishedCount, updatedIso) {
     const st = teamStats(b);
-    const lead = r => members.filter(m => m.role === r).map(m => m.first + ' ' + m.last).join(', ');
+    const lead = r => members.filter(m => hasRole(m, r)).map(m => m.first + ' ' + m.last).join(', ');
     const items = b.criteria.items;
     const count = s => items.filter(i => critState(b, i) === s).length;
     return {
@@ -685,7 +691,7 @@ const CSI = (function () {
   return {
     COLUMNS, COLUMN_NAMES, ROLES, LEAD_ROLES, ASSET_TYPES, RESULTS, PALETTE, MAX, DEFAULT_CAKE,
     blank, sanitize, applyOp, run, clone, teamStats, memberStats, critState, finishWarnings,
-    isLead, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner
+    isLead, rolesOf, hasRole, joinRoles, capOf, nameOf, memberOf, goalsOwned, days, teamSummary, studentRow, withColors, codeByOwner
   };
 })();
 /* ===== END SHARED BOARD RULES ===== */
@@ -901,8 +907,9 @@ function teacherOps_(team, ops) {
 }
 
 function setRole_(email, role, intern) {
-  role = String(role == null ? '' : role);
-  if (role && CSI.ROLES.indexOf(role) < 0) throw new Error('Pick a role from the list.');
+  const parsed = parseRoles_(role);
+  if (parsed.error) throw new Error(parsed.error);
+  role = parsed.role;
   const sh = SpreadsheetApp.getActive().getSheetByName(TABS.ROSTER);
   if (!sh) throw new Error('There is no Roster tab yet.');
   const vals = sh.getDataRange().getValues();
@@ -913,13 +920,13 @@ function setRole_(email, role, intern) {
     if (normEmail_(vals[i][idx.email]) === email) { row = i; team = String(vals[i][idx.team]).trim(); break; }
   }
   if (row < 0) throw new Error("That student isn't on the Roster tab anymore.");
-  if (role === 'PM' || role === 'Asst PM') {
+  CSI.rolesOf({ role: role }).filter(r => CSI.LEAD_ROLES.indexOf(r) >= 0).forEach(lead => {
     for (let i = 1; i < vals.length; i++) {
-      if (i !== row && String(vals[i][idx.team]).trim() === team && normRole_(vals[i][idx.role]) === role) {
-        throw new Error(team + ' already has a ' + role + ': ' + vals[i][idx.first] + ' ' + vals[i][idx.last] + '. Change that student first.');
+      if (i !== row && String(vals[i][idx.team]).trim() === team && CSI.hasRole({ role: normRole_(vals[i][idx.role]) }, lead)) {
+        throw new Error(team + ' already has a ' + lead + ': ' + vals[i][idx.first] + ' ' + vals[i][idx.last] + '. Change that student first.');
       }
     }
-  }
+  });
   sh.getRange(row + 1, idx.role + 1).setValue(role);
   if (intern != null) sh.getRange(row + 1, idx.intern + 1).setValue(intern ? 'Y' : '');
   CacheService.getScriptCache().remove('roster');
@@ -1144,7 +1151,7 @@ function parseRoster_() {
     const r = vals[i];
     const first = clean_(r[idx.first], 40), last = clean_(r[idx.last], 40);
     const email = normEmail_(r[idx.email]), team = clean_(r[idx.team], 40);
-    const roleRaw = clean_(r[idx.role], 40);
+    const roleRaw = clean_(r[idx.role], 80);
     if (!first && !last && !email && !team) continue;
     const name = (first + ' ' + last).trim() || email || '(blank name)';
     const line = i + 1;
@@ -1152,10 +1159,10 @@ function parseRoster_() {
     if (email === demo) continue;
     if (seen[email]) { issue(line, name, team, 'Listed twice (also row ' + seen[email] + '). Only the first row is used.'); continue; }
     seen[email] = line;
-    const role = normRole_(roleRaw);
+    const parsed = parseRoles_(roleRaw), role = parsed.role;
     if (!team) issue(line, name, '', 'No Project Team. This student cannot open a board until one is added.');
     if (!roleRaw) issue(line, name, team, 'Role pending. Add a role.');
-    else if (!role) issue(line, name, team, '"' + roleRaw + '" is not one of the roles: ' + CSI.ROLES.join(', ') + '.');
+    else if (parsed.error) issue(line, name, team, parsed.error);
     out.people.push({ row: line, first: first, last: last, email: email, team: team, role: role,
       intern: yes_(r[idx.intern]), key: keyFor_(email) });
   }
@@ -1164,11 +1171,11 @@ function parseRoster_() {
   Object.keys(teams).forEach(t => {
     const ps = teams[t];
     const named = arr => arr.map(p => p.first + ' ' + p.last).join(', ');
-    const pms = ps.filter(p => p.role === 'PM'), apms = ps.filter(p => p.role === 'Asst PM');
+    const pms = ps.filter(p => CSI.hasRole(p, 'PM')), apms = ps.filter(p => CSI.hasRole(p, 'Asst PM'));
     if (!pms.length) issue('', '', t, 'No PM yet.');
     if (pms.length > 1) issue('', named(pms), t, 'More than one PM. Keep one.');
     if (apms.length > 1) issue('', named(apms), t, 'More than one Asst PM. Keep one.');
-    if (!ps.some(p => p.role === 'Developer' && !p.intern)) issue('', '', t, 'No Developer yet (interns do not count).');
+    if (!ps.some(p => CSI.hasRole(p, 'Developer') && !p.intern)) issue('', '', t, 'No Developer yet (interns do not count).');
   });
   return out;
 }
@@ -1190,10 +1197,23 @@ function headerIndex_(row) {
   return out;
 }
 
-function normRole_(v) {
-  const k = String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
-  return ROLE_ALIASES[k] || '';
+// Reads a Role cell: one role, or up to CSI.MAX.roles joined with "+" (e.g. "PM + Developer").
+// Returns { role: 'PM + Developer' in standard order, error: '' } or { role: '', error: why }.
+function parseRoles_(v) {
+  const raw = String(v == null ? '' : v).trim();
+  if (!raw) return { role: '', error: '' };
+  const parts = raw.split('+').map(p => p.trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean);
+  const found = [];
+  for (let i = 0; i < parts.length; i++) {
+    const r = ROLE_ALIASES[parts[i]];
+    if (!r) return { role: '', error: '"' + parts[i] + '" is not one of the roles: ' + CSI.ROLES.join(', ') + '.' };
+    if (found.indexOf(r) < 0) found.push(r);
+  }
+  if (found.length > CSI.MAX.roles) return { role: '', error: 'A student can hold at most ' + CSI.MAX.roles + ' roles.' };
+  if (found.indexOf('PM') >= 0 && found.indexOf('Asst PM') >= 0) return { role: '', error: 'PM and Asst PM must be two different students.' };
+  return { role: CSI.joinRoles(found), error: '' };
 }
+function normRole_(v) { return parseRoles_(v).role; }
 function yes_(v) { return v === true || /^(y|yes|true|x|1)$/i.test(String(v == null ? '' : v).trim()); }
 
 // Teammates sorted by last name; each gets their own sticky-note color.
