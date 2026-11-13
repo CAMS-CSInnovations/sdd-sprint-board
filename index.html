@@ -124,6 +124,7 @@ main{ padding:20px clamp(14px,3vw,32px) 48px; }
 .team-list{ margin-top:14px; }
 .mem{ display:grid; grid-template-columns:18px 1fr auto; gap:2px 8px; align-items:center; padding:4px 0; font-size:.92rem; }
 .mem .role{ grid-column:2; color:var(--muted); font-size:.8rem; margin-top:-3px; }
+.mem .role2{ grid-column:2 / -1; width:auto; max-width:100%; padding:2px 6px; font-size:.8rem; margin-top:2px; }
 .mem .flag{ grid-column:2 / -1; color:var(--danger); font-size:.8rem; font-weight:700; }
 .mem .load{ font-size:.8rem; color:var(--muted); white-space:nowrap; }
 .mem.me .name{ font-weight:700; }
@@ -528,7 +529,7 @@ table.roster{ width:100%; min-width:1100px; border-collapse:collapse; font-size:
    SETUP: paste your Apps Script web app URL (ends in /exec) here.
    Leave it empty to preview the board without saving anything.
    ===================================================================== */
-const API_URL = 'https://script.google.com/macros/s/AKfycbxdlCZwvrNb3QABitCs2_WJs-WXpdMiS6nSAPnMqH-c0Cdb3wGaY6scA72x63R7lTAMdg/exec';
+const API_URL = '';
 
 const EMAIL_RE = /^\d{9}@lbschools\.net$/;
 // Teacher addresses start with a letter (first initial + last name, sometimes with a number).
@@ -563,7 +564,9 @@ const CSI = (function () {
   const T = (v, n) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, n);
   const short = t => (t.length > 40 ? t.slice(0, 38) + '…' : t);
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
-  const isLead = m => !!m && LEAD_ROLES.indexOf(m.role) >= 0;
+  // A student can be a lead through their primary role or a second role of Asst PM.
+  const isLead = m => !!m && (LEAD_ROLES.indexOf(m.role) >= 0 || LEAD_ROLES.indexOf(m.role2) >= 0);
+  const hasRole = (m, role) => !!m && (m.role === role || m.role2 === role);
   const capOf = m => (m && m.intern ? MAX.internGoals : MAX.goals);
   const nameOf = m => (m ? (m.first + ' ' + m.last).trim() : 'A former teammate');
 
@@ -611,7 +614,7 @@ const CSI = (function () {
     return {
       sprintNo: 1, sprint: 'Sprint 1', start: '', due: '',
       goals: [], cards: [], retro: [], assets: [], blockers: [], congrats: [],
-      lateCake: DEFAULT_CAKE, prev: null, activity: {},
+      lateCake: DEFAULT_CAKE, prev: null, activity: {}, roles2: {},
       criteria: { status: 'draft', note: '', change: '', items: [] },
       updatedBy: '', updatedAt: null
     };
@@ -640,6 +643,9 @@ const CSI = (function () {
     const act = x.activity && typeof x.activity === 'object' ? x.activity : {};
     const activity = {};
     Object.keys(act).slice(0, 40).forEach(k => { const v = iso(act[k]); if (v) activity[id(k)] = v; });
+    const r2 = x.roles2 && typeof x.roles2 === 'object' ? x.roles2 : {};
+    const roles2 = {};
+    Object.keys(r2).slice(0, 40).forEach(k => { if (ROLES.indexOf(r2[k]) > 0) roles2[id(k)] = r2[k]; });
     return {
       sprintNo: sprintNo,
       sprint: s(x.sprint, 60) || ('Sprint ' + sprintNo),
@@ -671,6 +677,7 @@ const CSI = (function () {
         open: arr(p.open).slice(0, MAX.cards).map(card)
       } : null,
       activity: activity,
+      roles2: roles2,
       criteria: {
         status: CRIT_STATUS.indexOf(crit.status) >= 0 ? crit.status : 'draft',
         note: s(crit.note, 400), change: s(crit.change, 400),
@@ -686,6 +693,10 @@ const CSI = (function () {
 
   /* ---------- Helpers the rules and the screens both use ---------- */
   function memberOf(members, key) { return (members || []).filter(m => m.key === key)[0] || null; }
+  // Primary roles come from the roster. Second roles live on the team's board, set by the PM or teacher.
+  function withRole2(m, b) { return m ? Object.assign({}, m, { role2: (b && b.roles2 && b.roles2[m.key]) || '' }) : m; }
+  function teamWithRoles(members, b) { return (members || []).map(m => withRole2(m, b)); }
+  function roleLabel(m) { return (m.role || 'Role pending') + (m.role2 ? ' + ' + m.role2 : '') + (m.intern ? ', intern' : ''); }
   function goalsOwned(b, key, exceptId) { return b.goals.filter(g => g.owner === key && g.id !== exceptId).length; }
 
   function checkCap(b, m, exceptId) {
@@ -809,11 +820,11 @@ const CSI = (function () {
 
   /* ---------- One change to the board. Throws a student-friendly message when a rule says no. ---------- */
   function applyOp(b, op, ctx) {
-    const a = ctx.actor;
+    const a = withRole2(ctx.actor, b);
     const now = ctx.now;
     const day = ctx.today || today(now);
     const teacherOnly = ['approveCriteria', 'returnCriteria', 'unlockCriteria', 'confirmCriterion'];
-    const teacherToo = ['setDates'];
+    const teacherToo = ['setDates', 'setRole2'];
     if (teacherOnly.indexOf(op.type) >= 0) { if (!ctx.teacher) fail('Only your teacher can do that.'); }
     else if (!a && !(ctx.teacher && teacherToo.indexOf(op.type) >= 0)) fail('Only team members can change the board.');
     let result = {};
@@ -838,6 +849,23 @@ const CSI = (function () {
           if (d > b.due) fail('This sprint already started, so only your teacher can push the due date later.');
         }
         b.start = s; b.due = d;
+        break;
+      }
+
+      case 'setRole2': {
+        if (!ctx.teacher) needLead(a, 'assign second roles');
+        const m = memberOf(ctx.members, op.key) || fail('That student is no longer on the team.');
+        const role = String(op.role || '');
+        if (!role) { delete b.roles2[m.key]; break; }
+        if (ROLES.indexOf(role) < 0) fail('Pick a role from the list.');
+        if (role === 'PM') fail('A team has one PM, set on the roster. Pick a different second role.');
+        if (role === m.role) fail(m.first + ' already has ' + role + ' as their main role.');
+        if (role === 'Asst PM') {
+          if (!ctx.teacher) fail('Only your teacher can make someone Asst PM.');
+          const other = ctx.members.filter(x => x.key !== m.key && (x.role === 'Asst PM' || b.roles2[x.key] === 'Asst PM'))[0];
+          if (other) fail('This team already has an Asst PM: ' + nameOf(other) + '.');
+        }
+        b.roles2[m.key] = role;
         break;
       }
 
@@ -1246,7 +1274,7 @@ const CSI = (function () {
     day = day || today();
     const st = teamStats(b);
     const ss = sprintState(b, day);
-    const lead = r => members.filter(m => m.role === r).map(m => m.first + ' ' + m.last).join(', ');
+    const lead = r => teamWithRoles(members, b).filter(m => hasRole(m, r)).map(m => m.first + ' ' + m.last).join(', ');
     const items = b.criteria.items;
     const count = s => items.filter(i => critState(b, i) === s).length;
     const status = !opened && ss.phase === 'unset' ? 'Not opened'
@@ -1273,7 +1301,8 @@ const CSI = (function () {
     const st = memberStats(b, p.key);
     seen = seen || {};
     return {
-      email: p.email, first: p.first, last: p.last, team: p.team, role: p.role || '', intern: !!p.intern,
+      key: p.key, email: p.email, first: p.first, last: p.last, team: p.team, role: p.role || '', intern: !!p.intern,
+      role2: (b.roles2 && b.roles2[p.key]) || '',
       safe: seen.safe || null, lastSeen: seen.lastSeen || null,
       goals: st.goals, cap: capOf(p), owned: st.owned, done: st.done,
       codeDone: st.codeDone, codeAll: st.codeDone + (codeEarlier || 0), reviews: st.reviews, shipped: st.shipped,
@@ -1298,7 +1327,7 @@ const CSI = (function () {
   return {
     COLUMNS, COLUMN_NAMES, ROLES, LEAD_ROLES, ASSET_TYPES, RESULTS, PALETTE, MAX, DEFAULT_CAKE, SPRINT_DAYS, CHECK_IN, AUTO_BY,
     blank, sanitize, applyOp, run, clone, teamStats, memberStats, critState, finishWarnings, checkIn, autoClose,
-    isLead, capOf, nameOf, memberOf, goalsOwned, workedOn, days, teamSummary, studentRow, withColors, codeByOwner,
+    isLead, hasRole, withRole2, teamWithRoles, roleLabel, capOf, nameOf, memberOf, goalsOwned, workedOn, days, teamSummary, studentRow, withColors, codeByOwner,
     today, toDay, parseDay, addDays, diffDays, fmtDay, sprintState, nextDates
   };
 })();
@@ -1527,7 +1556,7 @@ function previewTeacher(action, p){
       return { ok:true };
     }
     case 'teacherEmailLeads': {
-      const leads = pvMembers(team).filter(CSI.isLead);
+      const leads = CSI.teamWithRoles(pvMembers(team), pvBoard(team)).filter(CSI.isLead);
       if (!leads.length) throw serverError(`${team} has no PM or Asst PM on the roster yet.`);
       if (!String(p.subject || '').trim() || !String(p.message || '').trim()) throw serverError('Add a subject and a message.');
       return { ok:true, sentTo:leads.map(m => `${m.first} ${m.last}`) };
@@ -1626,7 +1655,7 @@ async function flushAll(){
 function boardFieldFocused(){
   const a = document.activeElement;
   return !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'checkbox' && a.type !== 'radio' &&
-    a.closest('#critDetail, #goalList, #flow .cards, #finishBox'));
+    a.closest('#critDetail, #goalList, #flow .cards, #finishBox, #memberList'));
 }
 async function refreshBoard(force){
   if ($('#board').hidden || state.readonly || !state.user) return;
@@ -1921,10 +1950,18 @@ const STUDENT_COLS = [
   { key:'check', label:'Check in', val:r => (r.flags.length ? 0 : 1), cell:r => r.flags.length
       ? r.flags.map(f => el('span', { class:'quiet', style:'margin-top:0', text:`⚑ ${f}` }))
       : (r.active ? '✓' : '—') },
-  { key:'role', label:'Role', val:r => r.role || '~', cell:r => {
+  { key:'role', label:'Main role', val:r => r.role || '~', cell:r => {
       const sel = el('select', { 'aria-label':`Role for ${r.first} ${r.last}`, onchange:e => setRole(r, e.target.value, null) },
         el('option', { value:'', text:'Role pending' }), (state.teacher.data.roles || CSI.ROLES).map(x => el('option', { value:x, text:x })));
       sel.value = r.role || '';
+      return sel;
+    } },
+  { key:'role2', label:'2nd role', val:r => r.role2 || '~', cell:r => {
+      if (!r.team) return '—';
+      const sel = el('select', { 'aria-label':`Second role for ${r.first} ${r.last}`, onchange:e => setRole2(r, e.target.value) },
+        el('option', { value:'', text:'None' }),
+        (state.teacher.data.roles || CSI.ROLES).filter(x => x !== 'PM' && x !== r.role).map(x => el('option', { value:x, text:x })));
+      sel.value = r.role2 || '';
       return sel;
     } },
   { key:'intern', label:'Intern', val:r => (r.intern ? 0 : 1), cell:r => el('label', { class:'check' },
@@ -1996,6 +2033,15 @@ async function setRole(r, role, intern){
   }catch(e){ toast(e.message); renderTable(); }
 }
 
+async function setRole2(r, role){
+  try{
+    const j = await tapi('teacherOps', { team:r.team, ops:[{ type:'setRole2', key:r.key, role, opId:uid() }] });
+    if (j.rejected && j.rejected.length) throw new Error(j.rejected[0].error);
+    await loadClass(); renderTeacher();
+    toast(`Saved ${r.first} ${r.last}: ${role ? 'second role ' + role : 'no second role'}.`);
+  }catch(e){ toast(e.message); renderTable(); }
+}
+
 async function viewTeam(team){
   try{
     const j = await tapi('teacherBoard', { team });
@@ -2063,8 +2109,8 @@ const nameOf = key => { const m = memberOf(key); return m ? `${m.first} ${m.last
 const firstOf = key => { const m = memberOf(key); return m ? m.first : 'Former teammate'; };
 const colorOf = key => { const m = memberOf(key); return m ? m.color : 'var(--untagged)'; };
 const initials = key => { const m = memberOf(key); return m ? (m.first[0] || '') + (m.last[0] || '') : '?'; };
-const roleText = m => (m.role || 'Role pending') + (m.intern ? ', intern' : '');
-const isLeadMe = () => !state.readonly && CSI.isLead(state.me);
+const roleText = m => CSI.roleLabel(CSI.withRole2(m, B()));
+const isLeadMe = () => !state.readonly && CSI.isLead(CSI.withRole2(state.me, B()));
 const teacherHere = () => state.readonly && !!state.teacher;
 const canEditGoal = g => !state.readonly && (g.owner === state.me.key || isLeadMe());
 const acOf = id => B().criteria.items.find(i => i.id === id);
@@ -2262,8 +2308,26 @@ function renderMembers(){
       el('span', { class:'name', text:`${m.first} ${m.last}${state.me && m.key === state.me.key ? ' (you)' : ''}` }),
       el('span', { class:'load', text:`${CSI.goalsOwned(b, m.key)} of ${CSI.capOf(m)} goals` }),
       el('span', { class:'role', text:roleText(m) }),
+      showFlags ? role2Picker(m) : null,
       flags.length ? el('span', { class:'flag', text:`⚑ ${flags.join('; ')}` }) : null);
   }));
+}
+
+// The PM, Asst PM, or teacher can give a student a second role (for small teams).
+// Only the teacher can hand out Asst PM this way.
+function role2Picker(m){
+  const cur = (B().roles2 || {})[m.key] || '';
+  const opts = CSI.ROLES.filter(r => r !== 'PM' && r !== m.role && (r !== 'Asst PM' || teacherHere() || cur === 'Asst PM'));
+  const sel = el('select', { class:'role2', 'aria-label':`Second role for ${m.first} ${m.last}`, onchange:e => {
+      const op = { type:'setRole2', key:m.key, role:e.target.value };
+      const label = e.target.value || 'no second role';
+      if (teacherHere()) teacherAct(op, `${m.first}: ${label}.`);
+      else if (!act(op)) renderMembers();
+    } },
+    el('option', { value:'', text:'+ Add a second role' }),
+    opts.map(r => el('option', { value:r, text:`Second role: ${r}` })));
+  sel.value = cur;
+  return sel;
 }
 
 function ownerOptions(sel, current, forGoals){
@@ -2458,7 +2522,7 @@ function renderColumns(){
   $('#mineBtn').hidden = state.readonly;
   $('#mineBtn').setAttribute('aria-pressed', String(mine));
   $('#mineBtn').textContent = mine ? 'Showing only my cards' : 'Show only my cards';
-  const qa = state.members.filter(m => m.role === 'QA Tester').map(m => m.first);
+  const qa = CSI.teamWithRoles(state.members, b).filter(m => CSI.hasRole(m, 'QA Tester')).map(m => m.first);
   $('#sub-review').textContent = "Someone who didn't work on it checks it off" + (qa.length ? `. QA: ${qa.join(', ')}` : '');
   COLUMNS.forEach((col, ci) => {
     const list = $(`#list-${col.id}`);
@@ -2504,7 +2568,7 @@ function cardEl(c, ci){
 function reviewBox(c){
   const me = state.me, box = el('div', { class:'review-box' });
   if (c.review){
-    if (me.key === c.review.by || CSI.isLead(me)) box.append(el('button', { type:'button', class:'ghost', text:'Undo review', onclick:() => act({ type:'review', id:c.id, on:false }) }));
+    if (me.key === c.review.by || isLeadMe()) box.append(el('button', { type:'button', class:'ghost', text:'Undo review', onclick:() => act({ type:'review', id:c.id, on:false }) }));
     else box.append(el('span', { text:'Reviewed. Move it to Deploy.' }));
   } else if (me.intern){
     box.append(el('span', { text:'A full team member reviews this.' }));
